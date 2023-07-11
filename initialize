@@ -21,10 +21,27 @@ fail() {
 }
 
 get_unready_pods() {
-	kubectl get pods -A -o json | \
-		jq -r '.items[] | "\(.metadata.namespace) \(.metadata.name) \(.status.conditions[] | select(.type == "Ready") .status)"' | \
-		grep -v ' True$' | \
-		awk '{ printf("%s %s\n", $1, $2) }'
+	local PODS=""
+	local COUNT="0"
+	while true ; do
+		PODS="$(kubectl get pods -A -o json 2>/dev/null)" || true
+		[ -n "${PODS}" ] || PODS="{ }"
+
+		# Count the number of pods ... if it's 0, we need to wait and
+		# count again
+		COUNT="$(jq -r '(.items)? | length' <<< "${PODS}")" || true
+		if [ ${COUNT} -eq 0 ] ; then
+			sleep 1 || return 1
+			continue
+		fi
+
+		echo -n "${PODS}" | \
+			jq -r '.items[] | "\(.metadata.namespace) \(.metadata.name) \(.status.conditions[] | select(.type == "Ready") .status)"' | \
+			grep -v ' True$' | \
+			awk '{ printf("%s %s\n", $1, $2) }'
+
+		return 0
+	done
 }
 
 #
