@@ -1,0 +1,12 @@
+controller:
+  ingressClass: haproxy
+
+  hostNetwork: true
+  dnsPolicy: ClusterFirstWithHostNet
+
+  # kind: DaemonSet
+  # daemonset:
+  #   useHostPort: true
+  #   hostPorts:
+  #     http: 80
+  #     https: 443

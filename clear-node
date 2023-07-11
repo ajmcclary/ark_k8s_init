@@ -1,0 +1,36 @@
+#!/bin/bash
+SCRIPT="$(readlink -f "${0}")"
+BASEDIR="$(dirname "${SCRIPT}")"
+SCRIPT="$(basename "${SCRIPT}")"
+
+set -e -o pipefail
+
+CRI_SOCKETS=(/var/run/cri-dockerd.sock /var/run/crio/crio.sock /var/run/containerd/containerd.sock)
+for SOCKET in "${CRI_SOCKETS[@]}" ; do
+	if [ -S "${SOCKET}" ] ; then
+		CRI=(--cri-socket "unix://${SOCKET}")
+		break
+	fi
+done
+
+echo_run() {
+	local ARGS=("${@}")
+	echo "${ARGS[@]@Q}"
+	"${@}"
+}
+
+# Clean house
+echo_run kubeadm reset -f "${CRI[@]}"
+[ -d /etc/cni/net.d ] && rm -rf /etc/cni/net.d
+[ -d ~/.kube ] && rm -rf ~/.kube
+rm -f /usr/local/share/ca-certificates/k8s-ca.crt
+
+CA_UPDATER=(update-ca-trust update-ca-certificates)
+for ca in "${CA_UPDATER[@]}" ; do
+	if which "${ca}" &>/dev/null ; then
+		echo_run "${ca}"
+		break
+	fi
+done
+
+echo_run systemctl stop kubelet

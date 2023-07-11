@@ -1,0 +1,142 @@
+#!/bin/bash
+SCRIPT="$(readlink -f "${0}")"
+BASEDIR="$(dirname "${SCRIPT}")"
+SOURCE="${BASH_SOURCE:-${0}}"
+
+set -euo pipefail
+
+DEF_BOOT_TIMEOUT=90
+MIN_BOOT_TIMEOUT=15
+
+SCRIPTS="${BASEDIR}/.scripts"
+[ -v K8S_CONF ] || K8S_CONF="${BASEDIR}/conf"
+
+say() {
+	echo -e "${@}"
+}
+
+fail() {
+	say "${@}" 1>&2
+	exit ${EXIT_CODE:-1}
+}
+
+get_unready_pods() {
+	kubectl get pods -A -o json | \
+		jq -r '.items[] | "\(.metadata.namespace) \(.metadata.name) \(.status.conditions[] | select(.type == "Ready") .status)"' | \
+		grep -v ' True$' | \
+		awk '{ printf("%s %s\n", $1, $2) }'
+}
+
+#
+# Initialize a single-node Kubernetes cluster
+#
+
+# [ -v CLUSTER_CIDR ] || export CLUSTER_CIDR="192.168.0.0/16"
+
+# For status tracking
+RC=0
+
+#
+# First, clean house
+#
+say "Clearing out existing configurations"
+OUT="$("${BASEDIR}/clear-node" 2>&1)" || RC=${?}
+[ ${RC} -eq 0 ] || fail "Failed clearing out the prior node configuration:\n${OUT}"
+
+#
+# Initialize Kubernetes
+#
+say "Initializing the K8s node"
+OUT="$("${SCRIPTS}/init-node" 2>&1)" || RC=${?}
+[ ${RC} -eq 0 ] || fail "Failed during node initialization:\n${OUT}"
+
+
+[ -v BOOT_TIMEOUT ] || BOOT_TIMEOUT=${DEF_BOOT_TIMEOUT}
+[[ "${BOOT_TIMEOUT}" =~ ^[1-9][0-9]*$ ]] || BOOT_TIMEOUT=${DEF_BOOT_TIMEOUT}
+[ ${BOOT_TIMEOUT} -ge ${MIN_BOOT_TIMEOUT} ] || BOOT_TIMEOUT=${MIN_BOOT_TIMEOUT}
+
+#
+# Wait for all pods to be ready, except the coredns pods
+#
+say "Will wait up to ${BOOT_TIMEOUT} seconds for the initial boot sequence to complete"
+START="$(date +%s)"
+while true ; do
+	UNREADY="$(get_unready_pods | grep -v '^kube-system coredns-' | wc -l)" || true
+	[ -n ${UNREADY} ] || fail "Failed while waiting for the initial boot sequence to complete, please install Calico et al 'manually'"
+	[[ "${UNREADY}" =~ ^[0-9]+$ ]] || fail "Failed to count the unready pods, please install Calico et al 'manually'"
+
+	# If there are no unready pods, we just break...
+	[ ${UNREADY} -eq 0 ] && break
+
+	NOW=$(date +%s)
+	[ $(( NOW - START )) -lt ${BOOT_TIMEOUT} ] || fail "Timed out waiting for the initial boot sequence to complete, please install Calico et al 'manually'"
+
+	sleep 1 || fail "Waiting cycle canceled, please install Calico et al 'manually'"
+	echo -n "."
+done
+say ""
+
+#
+# Add Calico
+#
+say "Installing Calico"
+OUT="$("${SCRIPTS}/init-calico" 2>&1)" || RC=${?}
+[ ${RC} -eq 0 ] || fail "Failed to install Calico: \n${OUT}"
+
+#
+# Add HAProxy
+#
+say "Installing HAProxy Ingress"
+OUT="$("${SCRIPTS}/init-hap" "${K8S_CONF}/haproxy-ingress-values.yaml" 2>&1)" || RC=${?}
+[ ${RC} -eq 0 ] || fail "Failed to install HAProxy Ingress: \n${OUT}"
+
+#
+# Add K8s dashboard
+#
+say "Deploying the K8s dashboard"
+OUT="$(kubectl apply -f "${K8S_CONF}/k8s-dashboard.yaml" 2>&1)" || RC=${?}
+[ ${RC} -eq 0 ] || fail "Failed to install the K8s dashboard: \n${OUT}"
+
+#
+# Create the AWS pull secret on the main namespace, as a template
+#
+say "Creating the aws-arkcase-pull template secret"
+OUT="$(kubectl apply -f "${K8S_CONF}/aws-arkcase-pull.yaml" 2>&1)" || RC=${?}
+[ ${RC} -eq 0 ] || fail "Failed to install the aws-arkcase-pull template secret: \n${OUT}"
+
+#
+# Add the ArkCase helm repository
+#
+say "Adding the ArkCase Helm Repo"
+OUT="$(helm repo add arkcase https://arkcase.github.io/ark_helm_charts/ 2>&1)" || RC=${?}
+[ ${RC} -eq 0 ] || fail "Failed to install the ArkCase Helm Repository: \n${OUT}"
+
+#
+# Add the default storage class
+#
+say "Installing the HostPath provisioner"
+OUT="$(helm install --create-namespace --namespace hostpath-provisioner hostpath-provisioner arkcase/hostpath-provisioner)" || RC=${?}
+[ ${RC} -eq 0 ] || fail "Failed to install the HostPath provisioner: \n${OUT}"
+
+say "Installation complete! Waiting for the pods to finish booting (up to ${BOOT_TIMEOUT} secs)..."
+kubectl get pods -A
+
+START="$(date +%s)"
+while true ; do
+	UNREADY="$(get_unready_pods | wc -l)" || true
+	[ -n ${UNREADY} ] || { say "Failed while waiting for the pods to become ready." ; break ; }
+	[[ "${UNREADY}" =~ ^[0-9]+$ ]] || { say "Failed to count the unready pods." ; break ; }
+
+	# If there are no unready pods, we just break...
+	[ ${UNREADY} -eq 0 ] && break
+
+	NOW=$(date +%s)
+	[ $(( NOW - START )) -lt ${BOOT_TIMEOUT} ] || { say "Timed out waiting for the pods to become ready." ; break ; }
+
+	sleep 1 || { say "Waiting cycle canceled." ; break ; }
+
+	echo -n "."
+done
+say ""
+
+exec kubectl get pods -A

@@ -1,0 +1,24 @@
+#!/bin/bash
+SCRIPT="$(readlink -f "${0}")"
+BASEDIR="$(dirname "${SCRIPT}")"
+SCRIPT="$(basename "${SCRIPT}")"
+
+set -e -o pipefail
+
+echo_run() {
+	local ARGS=("${@}")
+	echo "${ARGS[@]@Q}"
+	"${@}"
+}
+
+# Install Istio
+echo_run istioctl install --set profile=default -y
+echo_run istioctl install --set profile=default --set meshConfig.defaultConfig.holdApplicationUntilProxyStarts=true -y
+
+# Enable Istio by default
+echo_run kubectl label namespace default istio-injection=enabled
+
+# This needs to be run on every master node to enable automatic Istio injection
+sed -i \
+	-e 's/\(--enable-admission-plugins=[^[:space:]]*\)/\1,MutatingAdmissionWebhook,ValidatingAdmissionWebhook/g' \
+	/etc/kubernetes/manifests/kube-apiserver.yaml

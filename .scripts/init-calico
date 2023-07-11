@@ -1,0 +1,43 @@
+#!/bin/bash
+SCRIPT="$(readlink -f "${0}")"
+BASEDIR="$(dirname "${SCRIPT}")"
+SCRIPT="$(basename "${SCRIPT}")"
+
+set -e -o pipefail
+
+echo_run() {
+	local ARGS=("${@}")
+	echo "${ARGS[@]@Q}"
+	"${@}"
+}
+
+CALICO_VERSION="v3.26.1"
+
+echo "Trying to discover the CIDR configuration for Calico..."
+for (( i = 0 ; i < 60 ; i++ )) ; do
+	NEW_CIDR="$(fgrep -m 1 -- "--cluster-cidr=" < <(kubectl cluster-info dump) || true)"
+	[ -z "${NEW_CIDR}" ] || break
+	sleep 1
+done
+
+echo "Checking whether the discovered CIDR is valid..."
+if [[ "${NEW_CIDR}" =~ ^.*--cluster-cidr=([0-9./]+).*$ ]] ; then
+	NEW_CIDR="${BASH_REMATCH[1]}"
+	echo "The configuration is valid!! CIDR = ${NEW_CIDR}"
+else
+	echo "The configuration is not recognized - [${NEW_CIDR}]"
+	exit 1
+fi
+
+if [[ "${NEW_CIDR}" =~ ^[0-9./]+$ ]] ; then
+	# First things first: add the operator
+	echo "Configuring Calico for CIDR [${NEW_CIDR}]..."
+	echo_run kubectl create -f "https://raw.githubusercontent.com/projectcalico/calico/${CALICO_VERSION}/manifests/tigera-operator.yaml"
+	CONFIG="$(sed -e "s;cidr: [0-9./]\+;cidr: ${NEW_CIDR};g" < \
+		<(curl "https://raw.githubusercontent.com/projectcalico/calico/${CALICO_VERSION}/manifests/custom-resources.yaml") )"
+	echo -e "Configuration: \n${CONFIG}"
+	echo_run kubectl create -f - <<< "${CONFIG}"
+else
+	echo "Unrecognized cluster CIDR format: [${NEW_CIDR}] - can't parse and configure Calico automatically"
+	exit 1
+fi

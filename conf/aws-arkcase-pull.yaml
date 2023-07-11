@@ -1,0 +1,11 @@
+#
+# This is the template secret that will be populated by login-aws
+#
+apiVersion: v1
+kind: Secret
+metadata:
+  name: aws-arkcase-pull
+  namespace: default
+type: kubernetes.io/dockerconfigjson
+stringData:
+  .dockerconfigjson: "{}"
