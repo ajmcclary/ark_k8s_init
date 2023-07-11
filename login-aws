@@ -1,0 +1,163 @@
+#!/bin/bash
+
+set -euo pipefail
+
+[ -v AWS_REGION ] || AWS_REGION="us-east-1"
+[ -v AWS_PROFILE ] || AWS_PROFILE="armedia-marketplace"
+[ -v K8S_SECRET ] || K8S_SECRET="aws-arkcase-pull"
+[ -v AWS_USERNAME ] || AWS_USERNAME="AWS"
+
+say() {
+	echo -e "${@}"
+}
+
+fail() {
+	say "${@}" 1>&2
+	exit ${EXIT_CODE:-1}
+}
+
+usage() {
+	fail "usage: ${BASH_ARGV0} (- | stdin | sso | local | help) [profile:...] [secret:...] [region:...]"
+}
+
+update_from_stdin() {
+	say "Please enter the AWS credentials info for profile [${AWS_PROFILE}] (copy+paste)"
+	local CREDS="$(cat | grep -v '^[[:space:]]*$' | grep -v "^[[:space:]]*\[")"
+	[ -n "${CREDS}" ] || fail "Empty credentials, can't continue"
+	local LINES="$(echo "${CREDS}" | wc -l)"
+	[ ${LINES} -eq 3 ] || fail "Badly formatted credentials (${LINES}):\n---\n${CREDS}\n---"
+
+	local KEY
+	local VALUE
+	local L="$(echo -n "${CREDS}" | grep "^aws_access_key_id=")"
+	[ -n "${L}" ] || fail "No Access Key ID found"
+	IFS="=" read KEY VALUE <<< "$(echo -n "${L}")"
+	[[ "${VALUE}" =~ ^[A-Z0-9]{20}$ ]] || fail "The Access Key ID is in the wrong format (length ${#VALUE}): [${VALUE}]"
+	local ACCESS="${L}"
+
+	L="$(echo -n "${CREDS}" | grep "^aws_secret_access_key=")"
+	[ -n "${L}" ] || fail "No Secret Access Key found"
+	IFS="=" read KEY VALUE <<< "$(echo -n "${L}")"
+	[[ "${VALUE}" =~ ^[A-Za-z0-9/+=]{40}$ ]] || fail "The Secret Access Key is in the wrong format (length ${#VALUE}): [${VALUE}]"
+	local K8S_SECRET="${L}"
+
+	L="$(echo -n "${CREDS}" | grep "^aws_session_token=")"
+	[ -n "${L}" ] || fail "No Session Token found"
+	IFS="=" read KEY VALUE <<< "$(echo -n "${L}")"
+	[[ "${VALUE}" =~ ^[A-Za-z0-9/+=]{4}+$ ]] || fail "The Session Token is in the wrong format (length ${#VALUE}): [${VALUE}]"
+	local TOKEN="${L}"
+
+	# Ok so the values look good ... now graft them onto the credentials file
+	say "Re-forming credentials file at [${CREDS_FILE}]..."
+	sed -i "${CREDS_FILE}" -e "/^\s*\[${AWS_PROFILE}\]\s*$/,/^\s*\[/d" && \
+		cat >> "${CREDS_FILE}" <<- EOF
+		[${AWS_PROFILE}]
+		${ACCESS}
+		${K8S_SECRET}
+		${TOKEN}
+		EOF
+}
+
+[ ${#} -lt 1 ] && usage
+[ ${#} -gt 4 ] && usage
+
+ACTION="${1}"
+shift
+
+PROFILE_SET="false"
+REGION_SET="false"
+SECRET_SET="false"
+for P in "${@}" ; do
+	case "${P}" in
+		profile:* )
+			${PROFILE_SET} && fail "Can't specify more than one profile"
+			export AWS_PROFILE="${P#profile:*}"
+			[ -n "${AWS_PROFILE}" ] || fail "The profile name may not be blank"
+			PROFILE_SET="true"
+			;;
+
+		region:* )
+			${REGION_SET} && fail "Can't specify more than one region"
+			export AWS_REGION="${P#region:*}"
+			[ -n "${AWS_REGION}" ] || fail "The region may not be blank"
+			REGION_SET="true"
+			;;
+
+		secret:* )
+			${SECRET_SET} && fail "Can't specify more than one secret name"
+			export K8S_SECRET="${P#name:*}"
+			[ -n "${K8S_SECRET}" ] || fail "The secret name may not be blank"
+			SECRET_SET="true"
+			;;
+
+		* )
+			fail "Unknown parameter: ${P}"
+			;;
+	esac
+done
+
+[[ "${AWS_PROFILE}" =~ ^[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?$ ]] || fail "The profile name [${AWS_PROFILE}] is invalid"
+[[ "${AWS_REGION}" =~ ^[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?$ ]] || fail "The region [${AWS_REGION}] is invalid"
+[[ "${K8S_SECRET}" =~ ^[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?$ ]] || fail "The secret name [${K8S_SECRET}] is invalid"
+
+say "Using profile ${AWS_PROFILE} (region = ${AWS_REGION}, secret = ${K8S_SECRET})"
+case "${ACTION,,}" in
+	"-" | "stdin" )
+		say "Logging in via data on STDIN..."
+		update_from_stdin
+		;;
+
+	"sso" )
+		say "Logging in via SSO..."
+		aws --profile "${AWS_PROFILE}" sso login
+		;;
+
+	"local" )
+		say "Logging in with credentials already stored locally..."
+		;;
+
+	* )
+		usage
+		;;
+esac
+
+export AWS_PROFILE="${AWS_PROFILE}"
+export AWS_REGION="${AWS_REGION}"
+
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>&1)
+[[ "${AWS_ACCOUNT_ID}" =~ ^[0-9]+$ ]] || fail "Failed to get the account ID for profile [${AWS_PROFILE}]: ${AWS_ACCOUNT_ID}"
+
+HOST="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+CREDS_FILE="${HOME}/.aws/credentials"
+
+say "Fetching the AWS login password for Docker (account ID ${AWS_ACCOUNT_ID})..."
+PASS="$(aws --profile="${AWS_PROFILE}" ecr get-login-password --region "${AWS_REGION}")"
+RC=${?}
+[ ${RC} -eq 0 ] || exit ${RC}
+
+say "Running Docker login for ${HOST}..."
+docker login --username "${AWS_USERNAME}" --password-stdin "${HOST}" <<< "${PASS}"
+RC=${?}
+[ ${RC} -eq 0 ] || exit ${RC}
+
+if kubectl get node &>/dev/null ; then
+	DOCKER_CONFIG="$(readlink -f ~/.docker/config.json 2>/dev/null)"
+	if [ -n "${DOCKER_CONFIG}" ] && [ -f "${DOCKER_CONFIG}" ] ; then
+		say "Creating Kubernetes secret (${K8S_SECRET}) for [${DOCKER_CONFIG}]..."
+		while read NS ; do
+			[ "${NS}" == "default" ] || kubectl get secret -n "${NS}" "${K8S_SECRET}" &>/dev/null || continue
+			say "\tCreating on namespace ${NS}..."
+			kubectl delete secret \
+				--namespace "${NS}" \
+				"${K8S_SECRET}" &>/dev/null || true
+			kubectl create secret \
+				generic \
+				--namespace "${NS}" \
+				"${K8S_SECRET}" \
+				--from-file=.dockerconfigjson="${DOCKER_CONFIG}" \
+				--type=kubernetes.io/dockerconfigjson || fail "ERROR: Failed to create the secret ${K8S_SECRET} in namespace ${NS} (${?})"
+		done < <(kubectl get namespace | awk '{ print $1 }' | tail -n +2 | sort)
+	fi
+fi
+say "Login complete"
+exit 0
