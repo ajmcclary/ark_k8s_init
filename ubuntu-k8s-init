@@ -1,0 +1,309 @@
+#!/bin/bash
+SCRIPT="$(readlink -f "${BASH_SOURCE:-${0}}")"
+BASEDIR="$(dirname "${SCRIPT}")"
+SCRIPT="$(basename "${SCRIPT}")"
+
+set -euo pipefail
+
+if [ "$(/usr/bin/id -u)" != "0" ] ; then
+
+	# Make sure these are visible "below"
+	[ -v CLUSTER_CIDR ] && export CLUSTER_CIDR
+	[ -v SERVICE_CIDR ] && export SERVICE_CIDR
+
+	#
+	# Take stock of the kernel versions installed
+	#
+	OLD_KERNELS="$(dpkg -l | grep linux-image-5 | awk '{ print $2 }' | sort -u)"
+
+	#
+	# Do the rooty-things
+	#
+	echo "👉 Not running as root, must escalate privileges!"
+	sudo -EH "${0}" "${@}"
+
+	#
+	# Take stock of the new kernel versions installed
+	#
+	NEW_KERNELS="$(dpkg -l | grep linux-image-5 | awk '{ print $2 }' | sort -u)"
+
+	#
+	# Now do the things that my user needs
+	#
+
+	#
+	# Set up the K8s configuration
+	#
+	if [ ! -f ~/.kube/config ] ; then
+		echo "👉 Configuring your K8s cluster settings"
+		mkdir -p ~/.kube
+		sudo cat /etc/kubernetes/admin.conf > ~/.kube/config
+		chown -R "${USER}:" ~/.kube
+		chmod -R go-rwx ~/.kube
+	fi
+
+	#
+	# Set up the AWS configuration
+	#
+	if [ -f ~/.aws/config ] ; then
+		echo "✅ Your AWS profiles are already configured"
+	else
+		echo "👉 Configuring your AWS profiles"
+		mkdir ~/.aws
+		cat <<-EOF > ~/.aws/config
+		[default]
+		region=us-east-1
+
+		[profile armedia-marketplace]
+		sso_account_id = 207428623785
+		sso_start_url = https://armedia-umbrella.awsapps.com/start
+		sso_region = us-east-1
+		sso_role_name = AWSPowerUserAccess
+		region = us-east-1
+		output = json
+
+		[profile arkcase-aws-optimization]
+		sso_account_id = 345280441424
+		sso_start_url = https://d-90676b47a3.awsapps.com/start
+		sso_region = us-east-1
+		sso_role_name = AWSAdministratorAccess
+		region = us-east-1
+		output = json
+		sso_registration_scopes = sso:account:access
+		EOF
+	fi
+
+	echo ""
+	echo ""
+	echo ""
+	echo "	✅ Installation completed. You should now be able to operate"
+	echo "	  Docker and Kubernetes locally"
+	echo ""
+
+	if docker ps -a &>/dev/null ; then
+		echo "	✅ Docker control is enabled"
+	else
+		echo "	❌ Your group memberships haven't been updated, you must"
+		echo "	  log out and back in to enable control of Docker"
+	fi
+	echo ""
+
+	if kubectl get pods -A &>/dev/null ; then
+		echo "	✅ Kubernetes control is enabled"
+	else
+		echo "	❌ Your Kubernetes configuration seems to be incorrect,"
+		echo "	  please fix it before continuing. Feel free to ask for"
+		echo "	  help if you feel it's necessary."
+	fi
+	echo ""
+
+	if [ "${OLD_KERNELS}" != "${NEW_KERNELS}" ] ; then
+		echo "	👉 New kernels were installed, it's strongly recommended that you"
+		echo "	  reboot to ensure the latest software is running."
+		echo ""
+	fi
+
+	exit 0
+fi
+
+is_installed() {
+	local PKG="${1}"
+	apt -qq list "${PKG}" --installed 2>/dev/null | fgrep -q  "[installed]" && return 0
+	return 1
+}
+
+TRUSTED_GPG_DIR="/etc/apt/trusted.gpg.d"
+APT_SOURCES_DIR="/etc/apt/sources.list.d"
+
+[ -v SUDO_USER ] && echo "✅ Privileges escalated! Proceeding with the installation"
+
+#
+# Full updates
+#
+echo "👉 Performing a full package update..."
+apt-get update && apt-get -f -y dist-upgrade && apt-get clean
+
+#
+# Extra packages
+#
+EXTRA_PACKAGES=(
+	apt-transport-https
+	ca-certificates
+	curl
+	git
+	gnupg
+	jq
+	moreutils
+	netcat
+	net-tools
+	procps
+	screen
+	telnet
+	wget
+)
+MISSING_PACKAGES=()
+for P in "${EXTRA_PACKAGES[@]}" ; do
+	is_installed "${P}" || MISSING_PACKAGES+=("${P}")
+done
+if [ ${#MISSING_PACKAGES[@]} -eq 0 ] ; then
+	echo "✅ All required packages are installed"
+else
+	echo "👉 Installing extra packages: [${MISSING_PACKAGES[@]}]..."
+	apt-get install -y "${MISSING_PACKAGES[@]}"
+fi
+
+#
+# Disable swap
+#
+if [ -z "$(swapon --show --noheadings --raw)" ] ; then
+	echo "✅ Swap is disabled as required by Kubernetes"
+else
+	echo "👉 Disabling swap (required by Kubernetes)"
+	swapoff -a
+	grep -v '[[:space:]]swap[[:space:]]' /etc/fstab | sponge /etc/fstab
+fi
+
+#
+# Install and configure Docker
+#
+if docker ps -a &>/dev/null ; then
+	echo "✅ Docker is already installed and running"
+else
+
+	if is_installed docker ; then
+		echo "✅ Docker is already installed"
+	else
+		echo "👉 Installing Docker..."
+		rm -f "${TRUSTED_GPG_DIR}/docker.gpg" &>/dev/null || true
+		curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o "${TRUSTED_GPG_DIR}/docker.gpg"
+		chmod a+r "${TRUSTED_GPG_DIR}/docker.gpg"
+		echo "deb [arch=amd64] https://download.docker.com/linux/ubuntu jammy stable" > "${APT_SOURCES_DIR}/docker.list"
+		apt-get update
+
+		mkdir -p /etc/docker
+		cat <<-EOF > /etc/docker/daemon.json
+		{
+			"ipv6": false,
+			"exec-opts": ["native.cgroupdriver=systemd"],
+			"insecure-registries" : ["nexus.armedia.com:5001"],
+			"log-driver": "json-file",
+			"log-opts": {"max-size": "100m" },
+			"registry-mirrors": ["http://nexus.armedia.com:5001"],
+			"storage-driver": "overlay2"
+		}
+		EOF
+		apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+		[ -v SUDO_USER ] && usermod -a -G docker "${SUDO_USER}"
+	fi
+
+	echo "👉 Enabling the Docker service..."
+	systemctl enable --now docker.service docker.socket
+	docker run hello-world
+fi
+
+if systemctl is-active --quiet cri-docker.service  ; then
+	echo "✅ CRI-Docker is already installed and running"
+else
+	if is_installed cri-dockerd ; then
+		echo "✅ CRI-Docker is already installed"
+	else
+		echo "👉 Installing CRI-Docker..."
+		wget https://github.com/Mirantis/cri-dockerd/releases/download/v0.3.4/cri-dockerd_0.3.4.3-0.ubuntu-jammy_amd64.deb
+		apt-get install -y ./cri-dockerd_0.3.4.3-0.ubuntu-jammy_amd64.deb
+	fi
+	echo "👉 Enabling CRI-Docker..."
+	systemctl enable --now cri-docker.service cri-docker.socket
+	# This will verify that it's running
+	systemctl is-active --quiet cri-docker.service
+fi
+
+#
+# Install Helm
+#
+if helm version &>/dev/null ; then
+	echo "✅ Helm is already installed"
+else
+	echo "👉 Installing Helm..."
+	curl -L https://get.helm.sh/helm-v3.12.1-linux-amd64.tar.gz | tar -C /usr/local/bin --strip-components=1 -xzvf - linux-amd64/helm
+	helm version &>/dev/null
+fi
+
+#
+# Install Kubernetes
+#
+if kubeadm version &>/dev/null ; then
+	echo "✅ Kubernetes already installed"
+else
+	echo "👉 Installing Kubernetes..."
+	rm -f "${TRUSTED_GPG_DIR}/kubernetes.gpg" &>/dev/null || true
+	curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor -o "${TRUSTED_GPG_DIR}/kubernetes.gpg"
+	echo "deb https://apt.kubernetes.io/ kubernetes-xenial main" > "${APT_SOURCES_DIR}/kubernetes.list"
+	apt-get update
+	apt-get install -y kubelet kubeadm kubectl
+fi
+
+#
+# Initialize the K8s node
+#
+if kubectl get pods -A &>/dev/null ; then
+	echo "✅ The Kubernetes node is already initialized"
+else
+	(
+		echo "👉 Initializing the Kubernetes cluster node..."
+		set -euo pipefail
+		cd "${BASEDIR}"
+		cp -vf login-aws /usr/local/bin
+		[ -v CLUSTER_CIDR ] && echo "	👉 CLUSTER_CIDR=[${CLUSTER_CIDR}]"
+		[ -v SERVICE_CIDR ] && echo "	👉 SERVICE_CIDR=[${SERVICE_CIDR}]"
+		./initialize
+	)
+fi
+
+#
+# Install AWS CLI
+#
+if aws --version &>/dev/null ; then
+	echo "✅ AWS CLI already installed"
+else
+	(
+		echo "👉 Installing AWS CLI..."
+		set -euo pipefail
+		cd
+		curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+		unzip awscliv2.zip
+		./aws/install "${UPGRADE_FLAGS[@]}"
+		rm -rf aws awscliv2.zip
+		aws --version
+	)
+fi
+
+#
+# Configure AWS CLI
+#
+if [ -f ~/.aws/config ] ; then
+	echo "✅ AWS profiles for root are already configured"
+else
+	echo "👉 Configuring root's AWS profiles..."
+	mkdir ~/.aws
+	cat <<-EOF > ~/.aws/config
+	[default]
+	region=us-east-1
+
+	[profile armedia-marketplace]
+	sso_account_id = 207428623785
+	sso_start_url = https://armedia-umbrella.awsapps.com/start
+	sso_region = us-east-1
+	sso_role_name = AWSPowerUserAccess
+	region = us-east-1
+	output = json
+
+	[profile arkcase-aws-optimization]
+	sso_account_id = 345280441424
+	sso_start_url = https://d-90676b47a3.awsapps.com/start
+	sso_region = us-east-1
+	sso_role_name = AWSAdministratorAccess
+	region = us-east-1
+	output = json
+	sso_registration_scopes = sso:account:access
+	EOF
+fi
