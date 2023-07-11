@@ -1,0 +1,34 @@
+#!/bin/bash
+
+CALLED="${BASH_SOURCE:-${0}}"
+
+set -euo pipefail
+
+say() {
+	echo -e "${@}"
+}
+
+start() {
+	say "Starting K8s services and pods..."
+	( set -x ; sudo systemctl start {,cri-}docker.s{ervice,ocket} kubelet.service )
+}
+
+stop() {
+	say "Stopping K8s services and pods..."
+	( set -x ; sudo systemctl stop kubelet.service {cri-,}docker.s{ocket,ervice} )
+}
+
+restart() {
+	stop
+	start
+}
+
+usage() {
+	say "usage: ${CALLED} (start|stop|restart)" 1>&2
+	exit 1
+}
+
+case "${1:-help}" in
+	stop | start | restart ) "${@}" ;;
+	* ) usage ;;
+esac
