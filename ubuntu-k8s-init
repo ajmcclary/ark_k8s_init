@@ -252,7 +252,7 @@ else
 		echo "👉 Initializing the Kubernetes cluster node..."
 		set -euo pipefail
 		cd "${BASEDIR}"
-		cp -vf login-aws /usr/local/bin
+		cp -vf login-aws k8s /usr/local/bin
 		[ -v CLUSTER_CIDR ] && echo "	👉 CLUSTER_CIDR=[${CLUSTER_CIDR}]"
 		[ -v SERVICE_CIDR ] && echo "	👉 SERVICE_CIDR=[${SERVICE_CIDR}]"
 		./initialize
