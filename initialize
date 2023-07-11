@@ -20,7 +20,7 @@ fail() {
 	exit ${EXIT_CODE:-1}
 }
 
-get_unready_pods() {
+get_pod_ready_status() {
 	local PODS=""
 	local COUNT="0"
 	while true ; do
@@ -35,13 +35,23 @@ get_unready_pods() {
 			continue
 		fi
 
-		echo -n "${PODS}" | \
-			jq -r '.items[] | "\(.metadata.namespace) \(.metadata.name) \(.status.conditions[] | select(.type == "Ready") .status)"' | \
-			grep -v ' True$' | \
-			awk '{ printf("%s %s\n", $1, $2) }'
+		# Get the list of pods and their ready status ... if the list
+		# is empty, we need to wait and try again ...
+		PODS="$(echo -n "${PODS}" | jq -r '.items[] | "\(.metadata.namespace) \(.metadata.name) \(.status.conditions[] | select(.type == "Ready") .status)"' 2>/dev/null)" || true
+		if [ -z "${PODS}" ] ; then
+			sleep 1 || return 1
+			continue
+		fi
 
+		echo "${PODS}"
 		return 0
 	done
+}
+
+get_unready_pods() {
+	get_pod_ready_status | \
+		grep -v ' True$' | \
+		awk '{ printf("%s %s\n", $1, $2) }'
 }
 
 #
