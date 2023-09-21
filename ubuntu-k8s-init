@@ -14,7 +14,7 @@ if [ "$(/usr/bin/id -u)" != "0" ] ; then
 	#
 	# Take stock of the kernel versions installed
 	#
-	OLD_KERNELS="$(dpkg -l | grep linux-image-5 | awk '{ print $2 }' | sort -u)"
+	OLD_KERNELS="$(dpkg -l | egrep 'linux-image-[56]' | awk '{ print $2 }' | sort -u)"
 
 	#
 	# Do the rooty-things
