@@ -17,7 +17,7 @@ fail() {
 }
 
 usage() {
-	fail "usage: ${BASH_ARGV0} (- | stdin | sso | local | help) [profile:...] [secret:...] [region:...]"
+	fail "usage: ${BASH_ARGV0:-${BASH_SOURCE:-${0}}} (- | stdin | sso | local | help) [profile:...] [secret:...] [region:...]"
 }
 
 update_from_stdin() {
@@ -124,7 +124,7 @@ esac
 export AWS_PROFILE="${AWS_PROFILE}"
 export AWS_REGION="${AWS_REGION}"
 
-AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>&1)
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>&1) || true
 [[ "${AWS_ACCOUNT_ID}" =~ ^[0-9]+$ ]] || fail "Failed to get the account ID for profile [${AWS_PROFILE}]: ${AWS_ACCOUNT_ID}"
 
 HOST="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
