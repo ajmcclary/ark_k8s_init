@@ -1,0 +1,67 @@
+#!/bin/bash
+set -euo pipefail
+
+timestamp() {
+	date -Ins -u
+}
+
+say() {
+	echo -e "${@}"
+}
+
+fail() {
+	say "❌ ${@}" 1>&2
+	exit ${EXIT_CODE:-1}
+}
+
+RESOLVED="systemd-resolved.service"
+
+# Is systemd-resolved installed?
+if ! systemctl list-unit-files "${RESOLVED}" --legend=false &>/dev/null ; then
+	say "⚠️ Systemd's resolver is not installed, nothing to do here"
+	exit 0
+fi
+
+# Ok ... so we're going to do this configuration ... let's escalate first!
+if [ "$(/usr/bin/id -u)" != "0" ] ; then
+	say "⚠️ Not running as root, must escalate privileges!"
+	exec sudo -EH "PATH=${PATH}" "${0}" "${@}"
+fi
+
+# TODO: Should we query what systemd's state directory is?
+SYSTEMD_DIR="/etc/systemd"
+TARGET_FILE="${SYSTEMD_DIR}/resolved.conf.d/00-k8s-dns-resolver.conf"
+
+# Keep track if the resolver daemon was running or not
+RESOLVED_RUNNING="false"
+systemctl status "${RESOLVED}" &>/dev/null && RESOLVED_RUNNING="true"
+
+# Get the IP for the DNS service...
+DNS_IP="$(kubectl get service -n kube-system kube-dns -o json | jq -r ".spec.clusterIP")" || fail "Failed to get the IP address for the kube-dns service"
+
+# Get the cluster domain (separated by spaces)
+CLUSTER_DOMAIN=($(kubectl get pod -n kube-system "$(kubectl get pod -n kube-system | grep "^kube-apiserver-" | awk '{ print $1 }')" -o json | jq -r '.spec.containers[].command[] | select(startswith("--service-account-issuer")) | sub("^.*=https://kubernetes[.]default[.]"; "default ") | gsub("[.]"; " ")'))
+
+set -- "${CLUSTER_DOMAIN[@]}"
+DOMAINS=()
+while [ ${#} -ge 2 ] ; do
+	DOMAINS+=( "$(IFS="." ; echo "${*}")" )
+	shift
+done
+
+say "✅ Creating the new configuration at [${TARGET_FILE}] as:"
+cat <<EOF | tee "${TARGET_FILE}"
+[Resolve]
+Cache=yes
+DNS=${DNS_IP}
+Domains=${DOMAINS[@]}
+EOF
+
+if "${RESOLVED_RUNNING}" ; then
+	say "👉 Restarting the local DNS service (${RESOLVED})..."
+	systemctl restart "${RESOLVED}" &>/dev/null || fail "Failed to restart the local DNS service"
+	say "✅ Local DNS configuration has been activated"
+else
+	say "⚠️  The local DNS service (${RESOLVED}) wasn't running, so this script won't start it - you must do so manually!"
+fi
+exit 0

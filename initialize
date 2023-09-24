@@ -164,6 +164,12 @@ while true ; do
 
 	echo -n "."
 done
-say ""
 
+#
+# Configure local DNS integration
+#
+say "Configuring the local DNS integration"
+"${SCRIPTS}/init-local-dns" 2>&1 || fail "Failed to configure the local DNS integration"
+
+say ""
 exec kubectl get pods -A
