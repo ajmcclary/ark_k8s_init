@@ -16,6 +16,10 @@ fail() {
 
 RESOLVED="systemd-resolved.service"
 
+# TODO: Should we query what systemd's state directory is?
+[ -v SYSTEMD_DIR ] || SYSTEMD_DIR="/etc/systemd"
+[ -d "${SYSTEMD_DIR}" ] || fail "No systemd status directory foudnd at [${SYSTEMD_DIR}] ... you may have to set it explicitly via the envvar SYSTEMD_DIR"
+
 # Is systemd-resolved installed?
 if ! systemctl list-unit-files "${RESOLVED}" --legend=false &>/dev/null ; then
 	say "⚠️ Systemd's resolver is not installed, nothing to do here"
@@ -28,10 +32,6 @@ if [ "$(/usr/bin/id -u)" != "0" ] ; then
 	exec sudo -EH "PATH=${PATH}" "${0}" "${@}"
 fi
 
-# TODO: Should we query what systemd's state directory is?
-SYSTEMD_DIR="/etc/systemd"
-TARGET_FILE="${SYSTEMD_DIR}/resolved.conf.d/00-k8s-dns-resolver.conf"
-
 # Keep track if the resolver daemon was running or not
 RESOLVED_RUNNING="false"
 systemctl status "${RESOLVED}" &>/dev/null && RESOLVED_RUNNING="true"
@@ -40,8 +40,19 @@ systemctl status "${RESOLVED}" &>/dev/null && RESOLVED_RUNNING="true"
 DNS_IP="$(kubectl get service -n kube-system kube-dns -o json | jq -r ".spec.clusterIP")" || fail "Failed to get the IP address for the kube-dns service"
 
 # Get the cluster domain (separated by spaces)
-CLUSTER_DOMAIN=($(kubectl get pod -n kube-system "$(kubectl get pod -n kube-system | grep "^kube-apiserver-" | awk '{ print $1 }')" -o json | jq -r '.spec.containers[].command[] | select(startswith("--service-account-issuer")) | sub("^.*=https://kubernetes[.]default[.]"; "default ") | gsub("[.]"; " ")'))
+CLUSTER_DOMAIN="$(kubectl get pod -n kube-system "$(kubectl get pod -n kube-system | grep "^kube-apiserver-" | awk '{ print $1 }')" -o json | jq -r '.spec.containers[].command[] | select(startswith("--service-account-issuer")) | sub("^.*=https://kubernetes[.]default[.]"; "default.")')"
 
+# Make sure the target directory exists
+TARGET_DIR="${SYSTEMD_DIR}/resolved.conf.d"
+[ -d "${TARGET_DIR}" ] || mkdir -p "${TARGET_DIR}" || fail "Failed to create the configuration's target directory at [${TARGET_DIR}]"
+
+# Construct the target filename
+TARGET_FILE="${TARGET_DIR}/k8s-${CLUSTER_DOMAIN}.conf"
+
+# Convert the cluster domain into an array ...
+IFS="." read -a CLUSTER_DOMAIN <<< "${CLUSTER_DOMAIN}"
+
+# Render the DNS search domains
 set -- "${CLUSTER_DOMAIN[@]}"
 DOMAINS=()
 while [ ${#} -ge 2 ] ; do
@@ -49,6 +60,7 @@ while [ ${#} -ge 2 ] ; do
 	shift
 done
 
+# Render the final configuration file
 say "✅ Creating the new configuration at [${TARGET_FILE}] as:"
 cat <<EOF | tee "${TARGET_FILE}"
 [Resolve]
@@ -57,6 +69,7 @@ DNS=${DNS_IP}
 Domains=${DOMAINS[@]}
 EOF
 
+# Restart the DNS resolver, if necessary
 if "${RESOLVED_RUNNING}" ; then
 	say "👉 Restarting the local DNS service (${RESOLVED})..."
 	systemctl restart "${RESOLVED}" &>/dev/null || fail "Failed to restart the local DNS service"
