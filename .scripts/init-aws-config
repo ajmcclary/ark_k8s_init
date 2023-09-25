@@ -1,0 +1,51 @@
+#!/bin/bash
+SCRIPT="$(readlink -f "${BASH_SOURCE:-${0}}")"
+BASEDIR="$(dirname "${SCRIPT}")"
+SCRIPT="$(basename "${SCRIPT}")"
+
+set -euo pipefail
+
+CURRENT_USER="$(id -un)"
+HOME="$(eval echo ~${CURRENT_USER})"
+
+if [ ! -d "${HOME}" ] ; then
+	echo "❌ No home directory [${HOME}] for user [${CURRENT_USER}] ... can't configure AWS"
+	exit 0
+fi
+
+#
+# Set up the AWS configuration
+#
+[ -v AWS_CONFIG ] || AWS_CONFIG="${HOME}/.aws/config"
+[ -v AWS_PROFILE ] || AWS_PROFILE="armedia-marketplace"
+[ -v AWS_ROLE ] || AWS_ROLE="AWSPowerUserAccess"
+
+if [ -f "${AWS_CONFIG}" ] ; then
+	echo "✅ The AWS configuration is already created at [${AWS_CONFIG}] for user ${CURRENT_USER}..."
+
+	# Remove any existing "armedia-marketplace" profiles
+	echo "👉 Removing the existing ${AWS_PROFILE} profile from the AWS configuration..."
+	sed -i \
+		-e '/^\s*\[\s*profile\s\+'"${AWS_PROFILE}"'\s*\]\s*$/,/^\s*\[/{/^\s*\[\s*profile\s\+'"${AWS_PROFILE}"'\s*\]\s*$/d;/^\s*\[/!d}' \
+		-e '/^\s*\[\s*'"${AWS_PROFILE}"'\s*\]\s*$/,/^\s*\[/{/^\s*\[\s*'"${AWS_PROFILE}"'\s*\]\s*$/d;/^\s*\[/!d}' \
+		"${AWS_CONFIG}"
+else
+	echo "👉 Creating your AWS configuration for user ${CURRENT_USER}..."
+	mkdir ~/.aws
+	cat <<-EOF > "${AWS_CONFIG}"
+	[default]
+	region=us-east-1
+	EOF
+fi
+
+echo "👉 Adding the ${AWS_PROFILE} profile to the AWS configuration at [${AWS_CONFIG}]..."
+cat <<-EOF >> "${AWS_CONFIG}"
+[profile ${AWS_PROFILE}]
+sso_account_id = 207428623785
+sso_start_url = https://armedia-umbrella.awsapps.com/start
+sso_region = us-east-1
+sso_role_name = ${AWS_ROLE}
+region = us-east-1
+output = json
+EOF
+echo "✅ Profile added!"
