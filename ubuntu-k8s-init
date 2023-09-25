@@ -61,15 +61,6 @@ if [ "$(/usr/bin/id -u)" != "0" ] ; then
 		sso_role_name = AWSPowerUserAccess
 		region = us-east-1
 		output = json
-
-		[profile arkcase-aws-optimization]
-		sso_account_id = 345280441424
-		sso_start_url = https://d-90676b47a3.awsapps.com/start
-		sso_region = us-east-1
-		sso_role_name = AWSAdministratorAccess
-		region = us-east-1
-		output = json
-		sso_registration_scopes = sso:account:access
 		EOF
 	fi
 
