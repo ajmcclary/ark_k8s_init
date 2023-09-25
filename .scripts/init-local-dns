@@ -64,7 +64,7 @@ done
 say "✅ Creating the new configuration at [${TARGET_FILE}] as:"
 cat <<EOF | tee "${TARGET_FILE}"
 [Resolve]
-Cache=yes
+Cache=no
 DNS=${DNS_IP}
 Domains=${DOMAINS[@]}
 EOF
