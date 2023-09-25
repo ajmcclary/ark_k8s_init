@@ -49,9 +49,12 @@ update_from_stdin() {
 
 	# Ok so the values look good ... now graft them onto the credentials file
 	say "Re-forming credentials file at [${CREDS_FILE}]..."
-	sed -i "${CREDS_FILE}" -e "/^\s*\[${AWS_PROFILE}\]\s*$/,/^\s*\[/d" && \
+	sed -i \
+		-e '/^\s*\[\s*profile\s\+'"${AWS_PROFILE}"'\s*\]\s*$/,/^\s*\[/{/^\s*\[\s*profile\s\+'"${AWS_PROFILE}"'\s*\]\s*$/d;/^\s*\[/!d}' \
+		-e '/^\s*\[\s*'"${AWS_PROFILE}"'\s*\]\s*$/,/^\s*\[/{/^\s*\[\s*'"${AWS_PROFILE}"'\s*\]\s*$/d;/^\s*\[/!d}' \
+		"${CREDS_FILE}" && \
 		cat >> "${CREDS_FILE}" <<- EOF
-		[${AWS_PROFILE}]
+		[profile ${AWS_PROFILE}]
 		${ACCESS}
 		${K8S_SECRET}
 		${TOKEN}
