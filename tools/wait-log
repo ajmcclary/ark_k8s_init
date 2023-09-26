@@ -1,0 +1,49 @@
+#!/bin/bash
+#
+# This script waits for a pod to be in the Running state, then follows the pod's
+# log. You can also specify the name of a container within the pod whose log you
+# wish to follow.
+#
+
+set -euo pipefail
+
+timestamp() {
+	date -Ins -u
+}
+
+say() {
+	echo -e "$(timestamp): ${@}"
+}
+
+fail() {
+	say "${@}" 1>&2
+	exit ${EXIT_CODE:-1}
+}
+
+usage() {
+	echo -e "usage: ${BASH_SOURCE:-${0}} pod [container]" 1>&2
+	exit 1
+}
+
+[ ${#} -ge 1 ] || usage
+[ ${#} -le 2 ] || usage
+
+POD="${1}"
+shift
+
+CONTAINER=""
+if [ ${#} -gt 0 ] ; then
+	CONTAINER="${1}"
+	shift
+fi
+
+wait-pod "${POD}" || fail "Pod ${POD} did not come up on time"
+
+if [ -n "${CONTAINER}" ] ; then
+	CONTAINER=(-c "${CONTAINER}")
+else
+	CONTAINER=()
+fi
+
+set -x
+exec kubectl logs -f "${CONTAINER[@]}" "${POD}"

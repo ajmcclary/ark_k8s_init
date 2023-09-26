@@ -1,0 +1,57 @@
+#!/bin/bash
+#
+# This script allows you to wait for a given pod to reach the Running state, so
+# you can use that as a synchronizer for other actions you wish to trigger.
+#
+set -eou pipefail
+
+CALLED="${BASH_SOURCE:-${0}}"
+
+timestamp() {
+	date -Ins -u
+}
+
+say() {
+	echo -e "$(timestamp): ${@}"
+}
+
+fail() {
+	say "${@}" 1>&2
+	exit ${EXIT_CODE:-1}
+}
+
+usage() {
+	echo -e "usage: ${BASH_SOURCE:-${CALLED}} [-d] [-t timeout] [-n namespace] [-h | -?] pod" 1>&2
+	exit 1
+}
+
+# Default timeout is 1 hour
+TIMEOUT="1h"
+TIMEOUT_GIVEN="false"
+NAMESPACE="default"
+NAMESPACE_GIVEN="false"
+DEBUG="false"
+while getopts ":t:n:hd" OPT "${@}" ; do
+	case "${OPT}" in
+		t ) [ -z "${OPTARG}" ] && fail "May not specify an empty timeout value"
+			${TIMEOUT_GIVEN} && fail "May not give more than one timeout value"
+			TIMEOUT="${OPTARG}"
+			TIMEOUT_GIVEN="true"
+			;;
+		n ) [ -z "${OPTARG}" ] && fail "May not specify an empty namespace"
+			${NAMESPACE_GIVEN} && fail "May not give more than one namespace value"
+			NAMESPACE="${OPTARG}"
+			NAMESPACE_GIVEN="true"
+			;;
+		d ) DEBUG="true" ;;
+		: ) fail "Option -${OPTARG} requires an argument" ;;
+		h | \? ) usage ;;
+	esac
+done
+shift $(( ${OPTIND} - 1 ))
+
+[ ${#} -lt 1 ] && usage
+POD="${1}"
+
+${DEBUG} && set -x
+exec kubectl wait --timeout="${TIMEOUT}" --for=jsonpath="{.status.phase}=Running" --namespace "${NAMESPACE}" "pod/${POD}"

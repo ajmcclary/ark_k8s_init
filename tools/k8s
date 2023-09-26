@@ -1,4 +1,8 @@
 #!/bin/bash
+#
+# This script allows you to rapidly control K8s and Docker as a unit, enabling you
+# to bring the entire ecosystem up or down with a single command.
+#
 
 CALLED="${BASH_SOURCE:-${0}}"
 CMD_PREFIX="__cmd_"

@@ -1,0 +1,67 @@
+#!/bin/bash
+#
+# This script detects older kernels in your system and allows you to purge
+# them all in a single command, making sure any residual files also get
+# cleaned out.
+#
+
+set -euo pipefail
+
+say() {
+	echo -e "${@}"
+}
+
+fail() {
+	say "${@}" 1>&2
+	exit ${EXIT_CODE:-1}
+}
+
+list_old_kernels() {
+	/usr/bin/dpkg -l --robot | \
+		/usr/bin/awk '{ print $2 }' | \
+		/usr/bin/grep '^linux-modules-' | \
+		/usr/bin/grep -v linux-modules-extra- | \
+		/usr/bin/sed -e 's;^linux-modules-;;g' | \
+		/usr/bin/sort -r -V | \
+		/usr/bin/tail -n +2
+}
+
+list_kernel_packages() {
+	local VERSION="${1}"
+	/usr/bin/dpkg -l | /usr/bin/fgrep "${VERSION}" | /usr/bin/awk '{ print $2 }'
+}
+
+readarray -t KERNELS < <(list_old_kernels)
+
+if [ ${#KERNELS[@]} -lt 1 ] ; then
+	say "No old kernels to remove."
+	exit 0
+fi
+
+PLURAL="s"
+[ ${#KERNELS[@]} -gt 1 ] || PLURAL=""
+
+PACKAGES=()
+say "Found ${#KERNELS[@]} old kernel${PLURAL}: ${KERNELS[@]}"
+for K in "${KERNELS[@]}" ; do
+	say "\tFinding the packages for Kernel ${K}..."
+	readarray -t -O ${#PACKAGES[@]} PACKAGES < <(list_kernel_packages "${K}")
+done
+
+say "Removing the old kernel packages:"
+
+[ "$(id -u)" -eq 0 ] || exec /usr/bin/sudo -i "${0}" "${@}"
+
+for P in "${PACKAGES[@]}" ; do
+	say "\t${P}"
+done | sort
+
+# Do the removal
+/usr/bin/apt-get --autoremove purge "${PACKAGES[@]}"
+
+for K in "${KERNELS[@]}" ; do
+	DIR="/lib/modules/${K}"
+	[ -d "${DIR}" ] || continue
+	say "Purging vestigial module files for ${K}..."
+	rm -rf "${DIR}" &>/dev/null || true
+done
