@@ -18,7 +18,7 @@ fi
 #
 [ -v AWS_CONFIG ] || AWS_CONFIG="${HOME}/.aws/config"
 [ -v AWS_PROFILE ] || AWS_PROFILE="armedia-marketplace"
-[ -v AWS_ROLE ] || AWS_ROLE="AWSReadOnly"
+[ -v AWS_ROLE ] || AWS_ROLE="AWSReadOnlyAccess"
 
 if [ -f "${AWS_CONFIG}" ] ; then
 	echo "✅ The AWS configuration is already created at [${AWS_CONFIG}] for user ${CURRENT_USER}..."
