@@ -36,13 +36,11 @@ if [ "$(/usr/bin/id -u)" != "0" ] ; then
 	#
 	# Set up the K8s configuration
 	#
-	if [ ! -f ~/.kube/config ] ; then
-		echo "👉 Configuring your K8s cluster settings"
-		mkdir -p ~/.kube
-		sudo cat /etc/kubernetes/admin.conf > ~/.kube/config
-		chown -R "${USER}:" ~/.kube
-		chmod -R go-rwx ~/.kube
-	fi
+	echo "👉 Configuring your K8s cluster settings"
+	mkdir -p ~/.kube
+	sudo cat /etc/kubernetes/admin.conf > ~/.kube/config
+	chown -R "${USER}:" ~/.kube
+	chmod -R go-rwx ~/.kube
 
 	#
 	# Configure AWS CLI for the calling user
@@ -228,7 +226,7 @@ else
 		echo "👉 Initializing the Kubernetes cluster node..."
 		set -euo pipefail
 		cd "${BASEDIR}"
-		cp -vf login-aws k8s /usr/local/bin
+		( cd tools && tar -czf - . ) | tar -C /usr/local/bin -xvf -
 		[ -v CLUSTER_CIDR ] && echo "	👉 CLUSTER_CIDR=[${CLUSTER_CIDR}]"
 		[ -v SERVICE_CIDR ] && echo "	👉 SERVICE_CIDR=[${SERVICE_CIDR}]"
 		./initialize
