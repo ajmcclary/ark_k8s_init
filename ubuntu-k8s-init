@@ -147,11 +147,13 @@ else
 	if is_installed docker ; then
 		echo "✅ Docker is already installed"
 	else
+		[ -v DOCKER_DISTRO ] || DOCKER_DISTRO=""
+		[ -n "${DOCKER_DISTRO}" ] || DOCKER_DISTRO="jammy"
 		echo "👉 Installing Docker..."
 		rm -f "${TRUSTED_GPG_DIR}/docker.gpg" &>/dev/null || true
-		curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o "${TRUSTED_GPG_DIR}/docker.gpg"
+		curl -fsSL "https://download.docker.com/linux/ubuntu/gpg" | gpg --dearmor -o "${TRUSTED_GPG_DIR}/docker.gpg"
 		chmod a+r "${TRUSTED_GPG_DIR}/docker.gpg"
-		echo "deb [arch=amd64] https://download.docker.com/linux/ubuntu jammy stable" > "${APT_SOURCES_DIR}/docker.list"
+		echo "deb [arch=amd64] https://download.docker.com/linux/ubuntu ${DOCKER_DISTRO} stable" > "${APT_SOURCES_DIR}/docker.list"
 		apt-get update
 
 		mkdir -p /etc/docker
@@ -159,10 +161,8 @@ else
 		{
 			"ipv6": false,
 			"exec-opts": ["native.cgroupdriver=systemd"],
-			"insecure-registries" : ["nexus.armedia.com:5001"],
 			"log-driver": "json-file",
 			"log-opts": {"max-size": "100m" },
-			"registry-mirrors": ["http://nexus.armedia.com:5001"],
 			"storage-driver": "overlay2"
 		}
 		EOF
@@ -181,9 +181,14 @@ else
 	if is_installed cri-dockerd ; then
 		echo "✅ CRI-Docker is already installed"
 	else
-		echo "👉 Installing CRI-Docker..."
-		wget https://github.com/Mirantis/cri-dockerd/releases/download/v0.3.4/cri-dockerd_0.3.4.3-0.ubuntu-jammy_amd64.deb
-		apt-get install -y ./cri-dockerd_0.3.4.3-0.ubuntu-jammy_amd64.deb
+		[ -v CRI_VER ] || CRI_VER=""
+		[ -n "${CRI_VER}" ] || CRI_VER="0.3.4"
+		[ -v CRI_DISTRO ] || CRI_DISTRO=""
+		[ -n "${CRI_DISTRO}" ] || CRI_DISTRO="jammy"
+		echo "👉 Installing CRI-Docker v${CRI_VER} (${CRI_DISTRO})..."
+		wget "https://github.com/Mirantis/cri-dockerd/releases/download/v${CRI_VER}/cri-dockerd_${CRI_VER}.3-0.ubuntu-${CRI_DISTRO}_amd64.deb"
+		apt-get install -y "./cri-dockerd_${CRI_VER}.3-0.ubuntu-${CRI_DISTRO}_amd64.deb"
+		rm -rf "./cri-dockerd_${CRI_VER}.3-0.ubuntu-${CRI_DISTRO}_amd64.deb" || true
 	fi
 	echo "👉 Enabling CRI-Docker..."
 	systemctl enable --now cri-docker.service cri-docker.socket
@@ -197,8 +202,10 @@ fi
 if helm version &>/dev/null ; then
 	echo "✅ Helm is already installed"
 else
-	echo "👉 Installing Helm..."
-	curl -L https://get.helm.sh/helm-v3.12.1-linux-amd64.tar.gz | tar -C /usr/local/bin --strip-components=1 -xzvf - linux-amd64/helm
+	[ -v HELM_VER ] || HELM_VER=""
+	[ -n "${HELM_VER}" ] || HELM_VER="3.13.1"
+	echo "👉 Installing Helm v${HELM_VER}..."
+	curl -fsSL https://get.helm.sh/helm-v${HELM_VER}-linux-amd64.tar.gz | tar -C /usr/local/bin --strip-components=1 -xzvf - linux-amd64/helm
 	helm version &>/dev/null
 fi
 
@@ -208,10 +215,12 @@ fi
 if kubeadm version &>/dev/null ; then
 	echo "✅ Kubernetes already installed"
 else
-	echo "👉 Installing Kubernetes..."
+	[ -v K8S_VER ] || K8S_VER=""
+	[ -n "${K8S_VER}" ] || K8S_VER="1.28"
+	echo "👉 Installing Kubernetes v${K8S_VER}..."
 	rm -f "${TRUSTED_GPG_DIR}/kubernetes.gpg" &>/dev/null || true
-	curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor -o "${TRUSTED_GPG_DIR}/kubernetes.gpg"
-	echo "deb https://apt.kubernetes.io/ kubernetes-xenial main" > "${APT_SOURCES_DIR}/kubernetes.list"
+	curl -fsSL "https://pkgs.k8s.io/core:/stable:/v${K8S_VER}/deb/Release.key" | gpg --dearmor -o "${TRUSTED_GPG_DIR}/kubernetes.gpg"
+	echo "deb https://pkgs.k8s.io/core:/stable:/v${K8S_VER}/deb/ /" > "${APT_SOURCES_DIR}/kubernetes.list"
 	apt-get update
 	apt-get install -y kubelet kubeadm kubectl
 fi
@@ -243,7 +252,7 @@ else
 		echo "👉 Installing AWS CLI..."
 		set -euo pipefail
 		cd
-		curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+		curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
 		unzip awscliv2.zip
 		./aws/install "${UPGRADE_FLAGS[@]}"
 		rm -rf aws awscliv2.zip
