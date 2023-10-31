@@ -203,7 +203,7 @@ if helm version &>/dev/null ; then
 	echo "✅ Helm is already installed"
 else
 	[ -v HELM_VER ] || HELM_VER=""
-	[ -n "${HELM_VER}" ] || HELM_VER="3.13.1"
+	[ -n "${HELM_VER}" ] || HELM_VER="3.12.3"
 	echo "👉 Installing Helm v${HELM_VER}..."
 	curl -fsSL https://get.helm.sh/helm-v${HELM_VER}-linux-amd64.tar.gz | tar -C /usr/local/bin --strip-components=1 -xzvf - linux-amd64/helm
 	helm version &>/dev/null
