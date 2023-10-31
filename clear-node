@@ -27,8 +27,10 @@ rm -f /usr/local/share/ca-certificates/k8s-ca.crt
 
 CA_UPDATER=(update-ca-trust update-ca-certificates)
 for ca in "${CA_UPDATER[@]}" ; do
-	if which "${ca}" &>/dev/null ; then
-		echo_run "${ca}"
+	if type -P "${ca}" &>/dev/null ; then
+		RC=0
+		echo_run "${ca}" || RC=${?}
+		[ ${RC} -eq 0 ] || echo "WARNING: ${ca} returned ${RC} ... certificate trusts may be incomplete!"
 		break
 	fi
 done

@@ -41,9 +41,11 @@ CA_UPDATER+=(update-ca-trust:/etc/pki/ca-trust/source/anchors)
 CA_UPDATER+=(update-ca-certificates:/usr/local/share/ca-certificates/)
 for updater in "${CA_UPDATER[@]}" ; do
 	IFS=":" read ca target <<< "${updater}"
-	if which "${ca}" &>/dev/null ; then
+	if type -P "${ca}" &>/dev/null ; then
 		echo_run cp -vf /etc/kubernetes/pki/ca.crt "${target}"/k8s-ca.crt
-		echo_run "${ca}"
+		RC=0
+		echo_run "${ca}" || RC=${?}
+		[ ${RC} -eq 0 ] || echo "WARNING: ${ca} returned ${RC} ... certificate trusts may be incomplete!"
 		break
 	fi
 done
