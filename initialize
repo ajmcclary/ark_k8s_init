@@ -125,6 +125,13 @@ OUT="$(kubectl apply -f "${K8S_CONF}/k8s-dashboard.yaml" 2>&1)" || RC=${?}
 [ ${RC} -eq 0 ] || fail "Failed to install the K8s dashboard: \n${OUT}"
 
 #
+# Add K8s metrics
+#
+say "Deploying the K8s metrics"
+OUT="$("${SCRIPTS}/init-metrics" 2>&1)" || RC=${?}
+[ ${RC} -eq 0 ] || fail "Failed to install the K8s metrics: \n${OUT}"
+
+#
 # Create the AWS pull secret on the main namespace, as a template
 #
 say "Creating the aws-arkcase-pull template secret"
