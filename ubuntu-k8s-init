@@ -5,6 +5,11 @@ SCRIPT="$(basename "${SCRIPT}")"
 
 SCRIPTS="${BASEDIR}/.scripts"
 
+list_kernels()
+{
+	dpkg -l | egrep "linux-image-[56]" | awk '{ print $2 }' | sort -u
+}
+
 set -euo pipefail
 
 if [ "$(/usr/bin/id -u)" != "0" ] ; then
@@ -16,18 +21,19 @@ if [ "$(/usr/bin/id -u)" != "0" ] ; then
 	#
 	# Take stock of the kernel versions installed
 	#
-	OLD_KERNELS="$(dpkg -l | egrep 'linux-image-[56]' | awk '{ print $2 }' | sort -u)"
+	OLD_KERNELS="$(list_kernels)" || true
 
 	#
 	# Do the rooty-things
 	#
 	echo "👉 Not running as root, must escalate privileges!"
-	sudo -EH "${0}" "${@}"
+	sudo -EH "${0}" "${@}" || { echo "	❌ Root installation tasks failed (rc=${?})!" ; exit 1 ; }
+	echo "	✅ Root portions completed!"
 
 	#
 	# Take stock of the new kernel versions installed
 	#
-	NEW_KERNELS="$(dpkg -l | grep linux-image-5 | awk '{ print $2 }' | sort -u)"
+	NEW_KERNELS="$(list_kernels)" || true
 
 	#
 	# Now do the things that my user needs
@@ -134,7 +140,7 @@ if [ -z "$(swapon --show --noheadings --raw)" ] ; then
 else
 	echo "👉 Disabling swap (required by Kubernetes)"
 	swapoff -a
-	grep -v '[[:space:]]swap[[:space:]]' /etc/fstab | sponge /etc/fstab
+	grep -v "[[:space:]]swap[[:space:]]" /etc/fstab | sponge /etc/fstab
 fi
 
 #
