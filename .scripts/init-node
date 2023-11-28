@@ -5,6 +5,32 @@ SCRIPT="$(basename "${SCRIPT}")"
 
 set -euo pipefail
 
+say()
+{
+	echo -e "${@}"
+}
+
+fail()
+{
+	say "❌ ${@}" 1>&2
+	exit ${EXIT_CODE:-1}
+}
+
+cleanup()
+{
+	if [ -v KUBEADM_CONFIG_FILE ] ; then
+		[ -n "${KUBEADM_CONFIG_FILE}" ] && rm -f "${KUBEADM_CONFIG_FILE}" &>/dev/null || true
+	fi
+}
+
+echo_run() {
+	local ARGS=("${@}")
+	echo "${ARGS[@]@Q}"
+	"${@}"
+}
+
+trap cleanup EXIT
+
 CRI_SOCKETS=(/var/run/cri-dockerd.sock /var/run/crio/crio.sock /var/run/containerd/containerd.sock)
 CRI=""
 for SOCKET in "${CRI_SOCKETS[@]}" ; do
@@ -18,20 +44,51 @@ done
 [ -v CLUSTER_CIDR ] || CLUSTER_CIDR="10.96.0.0/12"
 [ -v SERVICE_CIDR ] || SERVICE_CIDR="${CLUSTER_CIDR}"
 
+LOCAL_ONLY_ENDPOINT="k8s.cluster.prv"
+LOCAL_ONLY_IFACE="kubelocal0"
+LOCAL_ONLY_ADDX="10.255.255.254"
+
 # From what we've seen, this is harmless if used all the time. However,
 # the exposure of this variable means that we can easily enough initialize
 # control plane nodes designed to use a shared endpoint IP (remember to
 # set up the HAP facade first!).
 [ -v CONTROL_PLANE_ENDPOINT ] || CONTROL_PLANE_ENDPOINT=""
-[ -n "${CONTROL_PLANE_ENDPOINT}" ] || CONTROL_PLANE_ENDPOINT="127.0.0.1"
+[ -n "${CONTROL_PLANE_ENDPOINT}" ] || CONTROL_PLANE_ENDPOINT="${LOCAL_ONLY_ENDPOINT}"
 
-echo_run() {
-	local ARGS=("${@}")
-	echo "${ARGS[@]@Q}"
-	"${@}"
-}
+if [ "${CONTROL_PLANE_ENDPOINT}" == "${LOCAL_ONLY_ENDPOINT}" ] ; then
 
-echo_run systemctl start kubelet
+	# Make sure the virtual interface exists
+	say "👉 Creating the ${LOCAL_ONLY_IFACE} veth interface..."
+	if ip link show "${LOCAL_ONLY_IFACE}" &>/dev/null ; then
+		say "\t✅ The interface already exists!"
+	else
+		ip link add name "${LOCAL_ONLY_IFACE}" type dummy || fail "Failed to create the k8s interface ${LOCAL_ONLY_IFACE}"
+		say "\t✅ The interface has been created!"
+
+		ifconfig "${LOCAL_ONLY_IFACE}" up || fail "Failed to bring up the interface ${LOCAL_ONLY_IFACE}"
+		say "\t✅ The interface is up!"
+	fi
+
+	read INET ADDX BRD BCAST REST < <(ip addr show "${LOCAL_ONLY_IFACE}" | egrep '^[[:space:]]*inet[[:space:]]+(0|[1-9])') || true
+	if [ -n "${ADDX}" ] ; then
+		LOCAL_ONLY_ADDX="${ADDX%%/*}"
+	else
+		ip addr add "${LOCAL_ONLY_ADDX}/32" dev "${LOCAL_ONLY_IFACE}" || fail "Failed to assign the IP address to ${LOCAL_ONLY_IFACE}"
+	fi
+	say "\t✅ The interface is assigned address [${LOCAL_ONLY_ADDX}]"
+
+	# Make sure the interface is persistent
+
+	# Make sure the virtual interface's IP address is listed in /etc/hosts
+	FILTERED_HOSTS="$(cat /etc/hosts | sed -e "/^.*\s${LOCAL_ONLY_ENDPOINT}\(\s.*\)\?$/d")"
+	cat > /etc/hosts <<-EOF
+	${FILTERED_HOSTS}
+	${LOCAL_ONLY_ADDX} ${LOCAL_ONLY_ENDPOINT}
+	EOF
+fi
+
+echo_run systemctl stop kubelet || true
+echo_run systemctl start kubelet || fail "Failed to start kubelet"
 
 KUBEADM_CONFIG=""
 read -r -d '' VAR <<-EOF || true
@@ -44,10 +101,10 @@ EOF
 KUBEADM_CONFIG+="${VAR}"
 KUBEADM_CONFIG+=$'\n'
 
-if [ "${CONTROL_PLANE_ENDPOINT}" == "127.0.0.1" ] ; then
+if [ "${CONTROL_PLANE_ENDPOINT}" == "${LOCAL_ONLY_ENDPOINT}" ] ; then
 	read -r -d '' VAR <<-EOF || true
 		localAPIEndpoint:
-		  advertiseAddress: 127.0.0.1
+		  advertiseAddress: ${LOCAL_ONLY_ADDX}
 	EOF
 	KUBEADM_CONFIG+="${VAR}"
 	KUBEADM_CONFIG+=$'\n'
@@ -61,42 +118,47 @@ read -r -d '' VAR <<-EOF || true
 	networking:
 	  serviceSubnet: ${SERVICE_CIDR}
 	  podSubnet: ${CLUSTER_CIDR}
-	apiServer:
-	  certSANs:
-	    - 127.0.0.1
-	    - localhost
-	    - localhost.localdomain
-	etcd:
-	  local:
-	    serverCertSANs:
-	      - 127.0.0.1
-	      - localhost
-	      - localhost.localdomain
-	    peerCertSANs:
-	      - 127.0.0.1
-	      - localhost
-	      - localhost.localdomain
 EOF
 KUBEADM_CONFIG+="${VAR}"
 KUBEADM_CONFIG+=$'\n'
 
-if [ "${CONTROL_PLANE_ENDPOINT}" == "127.0.0.1" ] ; then
+if [ "${CONTROL_PLANE_ENDPOINT}" == "${LOCAL_ONLY_ENDPOINT}" ] ; then
 	read -r -d '' VAR <<-EOF || true
+		apiServer:
+		  certSANs:
+		    - 127.0.0.1
+		    - localhost
+		    - localhost.localdomain
+		    - ${LOCAL_ONLY_ENDPOINT}
+		etcd:
+		  local:
+		    serverCertSANs:
+		      - 127.0.0.1
+		      - localhost
+		      - localhost.localdomain
+		      - ${LOCAL_ONLY_ENDPOINT}
+		    peerCertSANs:
+		      - 127.0.0.1
+		      - localhost
+		      - localhost.localdomain
+		      - ${LOCAL_ONLY_ENDPOINT}
 		    extraArgs:
-		      listen-client-urls: https://127.0.0.1:2379
-		      # advertise-client-urls: https://127.0.0.1:2379
-		      listen-peer-urls: https://127.0.0.1:2380
-		      # initial-advertise-peer-urls: https://127.0.0.1:2380
+		      listen-client-urls: https://${LOCAL_ONLY_ADDX}:2379
+		      advertise-client-urls: https://${LOCAL_ONLY_ADDX}:2379
+		      listen-peer-urls: https://${LOCAL_ONLY_ADDX}:2380
+		      initial-advertise-peer-urls: https://${LOCAL_ONLY_ADDX}:2380
 	EOF
-	# The spaces up front are important in order to preserve indentation
-	KUBEADM_CONFIG+="    ${VAR}"
+	KUBEADM_CONFIG+="${VAR}"
 	KUBEADM_CONFIG+=$'\n'
 fi
 
+KUBEADM_CONFIG_FILE="$(mktemp --suffix=.yaml)"
+echo "${KUBEADM_CONFIG}" > "${KUBEADM_CONFIG_FILE}"
+
 # Next, init the cluster
 echo_run kubeadm init \
-	--config <(echo -n "${KUBEADM_CONFIG}") \
-	--upload-certs
+	--config "${KUBEADM_CONFIG_FILE}" \
+	--upload-certs || fail "Failed to run the kubeadm init command"
 
 CA_UPDATER=()
 CA_UPDATER+=(update-ca-trust:/etc/pki/ca-trust/source/anchors)
