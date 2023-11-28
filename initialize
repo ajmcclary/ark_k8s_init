@@ -157,7 +157,7 @@ kubectl get pods -A
 
 START="$(date +%s)"
 while true ; do
-	UNREADY="$(get_unready_pods | wc -l)" || true
+	UNREADY="$(get_unready_pods | grep -v '^kube-system metrics-server-' | wc -l)" || true
 	[ -n ${UNREADY} ] || { say "Failed while waiting for the pods to become ready." ; break ; }
 	[[ "${UNREADY}" =~ ^[0-9]+$ ]] || { say "Failed to count the unready pods." ; break ; }
 
