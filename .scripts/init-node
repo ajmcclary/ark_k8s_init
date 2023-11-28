@@ -6,32 +6,24 @@ SCRIPT="$(basename "${SCRIPT}")"
 set -euo pipefail
 
 CRI_SOCKETS=(/var/run/cri-dockerd.sock /var/run/crio/crio.sock /var/run/containerd/containerd.sock)
-CRI=()
+CRI=""
 for SOCKET in "${CRI_SOCKETS[@]}" ; do
 	if [ -S "${SOCKET}" ] ; then
-		CRI=(--cri-socket "unix://${SOCKET}")
+		CRI="unix://${SOCKET}"
 		break
 	fi
 done
+[ -n "${CRI}" ] || { echo "❌ Failed to find the CRI socket from the candidates [${CRI_SOCKETS[@]}]" ; exit 1 ; }
 
 [ -v CLUSTER_CIDR ] || CLUSTER_CIDR="10.96.0.0/12"
 [ -v SERVICE_CIDR ] || SERVICE_CIDR="${CLUSTER_CIDR}"
-
-# This will get populated as we go
-FLAGS=(
-	--pod-network-cidr "${CLUSTER_CIDR}"
-	--service-cidr "${SERVICE_CIDR}"
-)
-
-[ -v CONTROL_PLANE_ENDPOINT ] || CONTROL_PLANE_ENDPOINT=""
 
 # From what we've seen, this is harmless if used all the time. However,
 # the exposure of this variable means that we can easily enough initialize
 # control plane nodes designed to use a shared endpoint IP (remember to
 # set up the HAP facade first!).
+[ -v CONTROL_PLANE_ENDPOINT ] || CONTROL_PLANE_ENDPOINT=""
 [ -n "${CONTROL_PLANE_ENDPOINT}" ] || CONTROL_PLANE_ENDPOINT="127.0.0.1"
-
-FLAGS+=(--control-plane-endpoint "${CONTROL_PLANE_ENDPOINT}")
 
 echo_run() {
 	local ARGS=("${@}")
@@ -41,8 +33,70 @@ echo_run() {
 
 echo_run systemctl start kubelet
 
+KUBEADM_CONFIG=""
+read -r -d '' VAR <<-EOF || true
+	---
+	apiVersion: kubeadm.k8s.io/v1beta3
+	kind: InitConfiguration
+	nodeRegistration:
+	  criSocket: ${CRI}
+EOF
+KUBEADM_CONFIG+="${VAR}"
+KUBEADM_CONFIG+=$'\n'
+
+if [ "${CONTROL_PLANE_ENDPOINT}" == "127.0.0.1" ] ; then
+	read -r -d '' VAR <<-EOF || true
+		localAPIEndpoint:
+		  advertiseAddress: 127.0.0.1
+	EOF
+	KUBEADM_CONFIG+="${VAR}"
+	KUBEADM_CONFIG+=$'\n'
+fi
+
+read -r -d '' VAR <<-EOF || true
+	---
+	apiVersion: kubeadm.k8s.io/v1beta3
+	kind: ClusterConfiguration
+	controlPlaneEndpoint: ${CONTROL_PLANE_ENDPOINT}
+	networking:
+	  serviceSubnet: ${SERVICE_CIDR}
+	  podSubnet: ${CLUSTER_CIDR}
+	apiServer:
+	  certSANs:
+	    - 127.0.0.1
+	    - localhost
+	    - localhost.localdomain
+	etcd:
+	  local:
+	    serverCertSANs:
+	      - 127.0.0.1
+	      - localhost
+	      - localhost.localdomain
+	    peerCertSANs:
+	      - 127.0.0.1
+	      - localhost
+	      - localhost.localdomain
+EOF
+KUBEADM_CONFIG+="${VAR}"
+KUBEADM_CONFIG+=$'\n'
+
+if [ "${CONTROL_PLANE_ENDPOINT}" == "127.0.0.1" ] ; then
+	read -r -d '' VAR <<-EOF || true
+		    extraArgs:
+		      listen-client-urls: https://127.0.0.1:2379
+		      # advertise-client-urls: https://127.0.0.1:2379
+		      listen-peer-urls: https://127.0.0.1:2380
+		      # initial-advertise-peer-urls: https://127.0.0.1:2380
+	EOF
+	# The spaces up front are important in order to preserve indentation
+	KUBEADM_CONFIG+="    ${VAR}"
+	KUBEADM_CONFIG+=$'\n'
+fi
+
 # Next, init the cluster
-echo_run kubeadm init --upload-certs "${CRI[@]}" "${FLAGS[@]}"
+echo_run kubeadm init \
+	--config <(echo -n "${KUBEADM_CONFIG}") \
+	--upload-certs
 
 CA_UPDATER=()
 CA_UPDATER+=(update-ca-trust:/etc/pki/ca-trust/source/anchors)
