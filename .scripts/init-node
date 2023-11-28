@@ -93,15 +93,22 @@ if [ "${CONTROL_PLANE_ENDPOINT}" == "${LOCAL_ONLY_ENDPOINT}" ] ; then
 		fail "You must have either NetworkManager or systemd-networkd running to configure the persistent virtual interface, or configure it manually beforehand (name=${LOCAL_ONLY_IFACE}, preferred IP=${LOCAL_ONLY_ADDX})"
 	fi
 
-	read INET ADDX BRD BCAST REST < <(ip addr show "${LOCAL_ONLY_IFACE}" | egrep '^[[:space:]]*inet[[:space:]]+(0|[1-9])') || true
-	if [ -n "${ADDX}" ] ; then
-		LOCAL_ONLY_ADDX="${ADDX%%/*}"
-	else
-		ip addr add "${LOCAL_ONLY_ADDX}/32" dev "${LOCAL_ONLY_IFACE}" || fail "Failed to assign the IP address to ${LOCAL_ONLY_IFACE}"
-	fi
-	say "\t✅ The interface is assigned address [${LOCAL_ONLY_ADDX}]"
+	POLL_TIMEOUT=30
+	START="$(date +%s)"
+	while true ; do
+		read INET ADDX BRD BCAST REST < <(ip addr show "${LOCAL_ONLY_IFACE}" | egrep '^[[:space:]]*inet[[:space:]]+(0|[1-9])') || true
+		if [ -n "${ADDX}" ] ; then
+			LOCAL_ONLY_ADDX="${ADDX%%/*}"
+			break
+		fi
 
-	# Make sure the interface is persistent
+		# No IP address yet ... have we waited long enough?
+		NOW="$(date +%s)"
+		[ $(( NOW - START )) -ge ${POLL_TIMEOUT} ] && fail "Failed to query the IP address for the interface '${LOCAL_ONLY_IFACE}'"
+		sleep 1 || fail "Sleep interrupted, cannot continue"
+	done
+
+	say "\t✅ The interface is assigned address [${LOCAL_ONLY_ADDX}]"
 
 	# Make sure the virtual interface's IP address is listed in /etc/hosts
 	FILTERED_HOSTS="$(cat /etc/hosts | sed -e "/^.*\s${LOCAL_ONLY_ENDPOINT}\(\s.*\)\?$/d")"
