@@ -3,7 +3,9 @@ SCRIPT="$(readlink -f "${0}")"
 BASEDIR="$(dirname "${SCRIPT}")"
 SCRIPT="$(basename "${SCRIPT}")"
 
-set -e -o pipefail
+set -euo pipefail
+
+[ "$(/usr/bin/id -u)" == "0" ] || exec sudo -EH "${0}" "${@}"
 
 CRI_SOCKETS=(/var/run/cri-dockerd.sock /var/run/crio/crio.sock /var/run/containerd/containerd.sock)
 for SOCKET in "${CRI_SOCKETS[@]}" ; do
