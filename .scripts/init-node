@@ -44,6 +44,7 @@ done
 [ -v CLUSTER_CIDR ] || CLUSTER_CIDR="10.96.0.0/12"
 [ -v SERVICE_CIDR ] || SERVICE_CIDR="${CLUSTER_CIDR}"
 
+LOCAL_ONLY_NAME="K8s-Local"
 LOCAL_ONLY_ENDPOINT="k8s.cluster.prv"
 LOCAL_ONLY_IFACE="kubelocal0"
 LOCAL_ONLY_ADDX="10.255.255.254"
@@ -58,15 +59,38 @@ LOCAL_ONLY_ADDX="10.255.255.254"
 if [ "${CONTROL_PLANE_ENDPOINT}" == "${LOCAL_ONLY_ENDPOINT}" ] ; then
 
 	# Make sure the virtual interface exists
-	say "👉 Creating the ${LOCAL_ONLY_IFACE} veth interface..."
-	if ip link show "${LOCAL_ONLY_IFACE}" &>/dev/null ; then
-		say "\t✅ The interface already exists!"
-	else
-		ip link add name "${LOCAL_ONLY_IFACE}" type dummy || fail "Failed to create the k8s interface ${LOCAL_ONLY_IFACE}"
-		say "\t✅ The interface has been created!"
+	say "👉 Creating the ${LOCAL_ONLY_IFACE} virtual interface..."
 
-		ifconfig "${LOCAL_ONLY_IFACE}" up || fail "Failed to bring up the interface ${LOCAL_ONLY_IFACE}"
-		say "\t✅ The interface is up!"
+	# First things first ... use NetworkManager (nmcli) or Systemd-Networkd?
+	if nmcli con show --active &>/dev/null ; then
+		if nmcli con show "${LOCAL_ONLY_NAME}" &>/dev/null ; then
+			say "\t✅ The interface already exists!"
+		else
+			nmcli conn add type dummy con-name "${LOCAL_ONLY_NAME}" ifname "${LOCAL_ONLY_IFACE}" ip4 "${LOCAL_ONLY_ADDX}/32" || fail "Failed to create the K8s virtual interface"
+			say "\t✅ The interface was created!"
+		fi
+	elif systemctl status systemd-networkd.service &>/dev/null ; then
+		SYSTEMD_DIR="/etc/systemd/network"
+		[ -d "${SYSTEMD_DIR}" ] || mkdir -p "${SYSTEMD_DIR}" || fail "Failed to locate or create the network directory at [${SYSTEMD_DIR}]"
+
+		# Do the Systemd-Networkd configuration
+		cat >> "/etc/systemd/network/10-${LOCAL_ONLY_IFACE}.netdev" <<-EOF
+		[NetDev]
+		Name=${LOCAL_ONLY_IFACE}
+		Kind=dummy
+		EOF
+
+		cat >> "/etc/systemd/network/10-${LOCAL_ONLY_IFACE}.network" <<-EOF
+		[Match]
+		Name=${LOCAL_ONLY_IFACE}
+
+		[Network]
+		Address=${LOCAL_ONLY_ADDX}/32
+		EOF
+
+		systemctl restart systemd-networkd.service || fail "Failed to restart the networking service"
+	else
+		fail "You must have either NetworkManager or systemd-networkd running to configure the persistent virtual interface, or configure it manually beforehand (name=${LOCAL_ONLY_IFACE}, preferred IP=${LOCAL_ONLY_ADDX})"
 	fi
 
 	read INET ADDX BRD BCAST REST < <(ip addr show "${LOCAL_ONLY_IFACE}" | egrep '^[[:space:]]*inet[[:space:]]+(0|[1-9])') || true
