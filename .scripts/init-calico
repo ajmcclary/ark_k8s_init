@@ -13,6 +13,13 @@ echo_run() {
 
 CALICO_VERSION="v3.26.1"
 
+LOCAL_IFACE="kubelocal0"
+
+[ -v CALICO_IFACE ] || CALICO_IFACE=""
+
+# If the local interface has been enabled, use that one for Calico
+ip addr show "${LOCAL_IFACE}" &>/dev/null && CALICO_IFACE="${LOCAL_IFACE}"
+
 echo "Trying to discover the CIDR configuration for Calico..."
 for (( i = 0 ; i < 60 ; i++ )) ; do
 	NEW_CIDR="$(fgrep -m 1 -- "--cluster-cidr=" < <(kubectl cluster-info dump) || true)"
@@ -35,6 +42,14 @@ if [[ "${NEW_CIDR}" =~ ^[0-9./]+$ ]] ; then
 	echo_run kubectl create -f "https://raw.githubusercontent.com/projectcalico/calico/${CALICO_VERSION}/manifests/tigera-operator.yaml"
 	CONFIG="$(sed -e "s;cidr: [0-9./]\+;cidr: ${NEW_CIDR};g" < \
 		<(curl "https://raw.githubusercontent.com/projectcalico/calico/${CALICO_VERSION}/manifests/custom-resources.yaml") )"
+
+	if [ -n "${CALICO_IFACE}" ] ; then
+		CONFIG="$(echo -n "${CONFIG}" | \
+			sed -e "/calicoNetwork:/a \ \ \ \ nodeAddressAutodetectionV4:" | \
+			sed -e "/nodeAddressAutodetectionV4:/a \ \ \ \ \ \ interface: '${CALICO_IFACE}'"
+		)"
+	fi
+
 	echo -e "Configuration: \n${CONFIG}"
 	echo_run kubectl create -f - <<< "${CONFIG}"
 else
