@@ -37,4 +37,15 @@ for ca in "${CA_UPDATER[@]}" ; do
 	fi
 done
 
+CONN="K8s-Local"
+if nmcli con show "${CONN}" &>/dev/null ; then
+	echo_run nmcli con del "${CONN}"
+fi
+
+IFACE="kubelocal0"
+rm -rf "/etc/systemd/network/10-${IFACE}".net* &>/dev/null || true
+if systemctl status systemd-networkd.service &>/dev/null ; then
+	echo_run systemctl restart systemd-networkd.service
+fi
+
 echo_run systemctl stop kubelet
