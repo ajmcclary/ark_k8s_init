@@ -5,9 +5,14 @@ SCRIPT="$(basename "${SCRIPT}")"
 
 set -euo pipefail
 
+timestamp()
+{
+	/usr/bin/date -Ins -u
+}
+
 say()
 {
-	echo -e "${@}"
+	echo -e "$(timestamp): ${@}"
 }
 
 fail()

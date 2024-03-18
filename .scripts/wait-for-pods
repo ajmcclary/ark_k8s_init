@@ -1,0 +1,93 @@
+#!/bin/bash
+SCRIPT="$(readlink -f "${0}")"
+
+set -euo pipefail
+
+DEF_BOOT_TIMEOUT=90
+MIN_BOOT_TIMEOUT=15
+
+timestamp()
+{
+	/usr/bin/date -Ins -u
+}
+
+say()
+{
+	echo -e "$(timestamp): ${@}"
+}
+
+fail()
+{
+	say "${@}" 1>&2
+	exit ${EXIT_CODE:-1}
+}
+
+get_pod_ready_status() {
+	local PODS=""
+	local COUNT="0"
+	while true ; do
+		PODS="$(kubectl get pods -A -o json 2>/dev/null)" || true
+		[ -n "${PODS}" ] || PODS="{ }"
+
+		# Count the number of pods ... if it's 0, we need to wait and
+		# count again
+		COUNT="$(jq -r '(.items)? | length' <<< "${PODS}")" || true
+		if [ ${COUNT} -eq 0 ] ; then
+			sleep 1 || return 1
+			continue
+		fi
+
+		# Get the list of pods and their ready status ... if the list
+		# is empty, we need to wait and try again ...
+		PODS="$(echo -n "${PODS}" | jq -r '.items[] | "\(.metadata.namespace) \(.metadata.name) \(.status.conditions[] | select(.type == "Ready") .status)"' 2>/dev/null)" || true
+		if [ -z "${PODS}" ] ; then
+			sleep 1 || return 1
+			continue
+		fi
+
+		echo "${PODS}"
+		return 0
+	done
+}
+
+get_unready_pods() {
+	get_pod_ready_status | \
+		grep -v ' True$' | \
+		awk '{ printf("%s %s\n", $1, $2) }'
+}
+
+#
+# Initialize a single-node Kubernetes cluster
+#
+
+# [ -v CLUSTER_CIDR ] || export CLUSTER_CIDR="192.168.0.0/16"
+
+# For status tracking
+RC=0
+
+[ -v BOOT_TIMEOUT ] || BOOT_TIMEOUT=${DEF_BOOT_TIMEOUT}
+[[ "${BOOT_TIMEOUT}" =~ ^[1-9][0-9]*$ ]] || BOOT_TIMEOUT=${DEF_BOOT_TIMEOUT}
+[ ${BOOT_TIMEOUT} -ge ${MIN_BOOT_TIMEOUT} ] || BOOT_TIMEOUT=${MIN_BOOT_TIMEOUT}
+
+say "Installation complete! Waiting for the pods to finish booting (up to ${BOOT_TIMEOUT} secs)..."
+kubectl get pods -A
+
+START="$(date +%s)"
+while true ; do
+	UNREADY="$(get_unready_pods | grep -v '^kube-system metrics-server-' | wc -l)" || true
+	[ -n ${UNREADY} ] || { say "Failed while waiting for the pods to become ready." ; break ; }
+	[[ "${UNREADY}" =~ ^[0-9]+$ ]] || { say "Failed to count the unready pods." ; break ; }
+
+	# If there are no unready pods, we just break...
+	[ ${UNREADY} -eq 0 ] && break
+
+	NOW=$(date +%s)
+	[ $(( NOW - START )) -lt ${BOOT_TIMEOUT} ] || { say "Timed out waiting for the pods to become ready." ; break ; }
+
+	sleep 1 || { say "Waiting cycle canceled." ; break ; }
+
+	echo -n "."
+done
+
+say ""
+exec kubectl get pods -A

@@ -6,7 +6,7 @@ timestamp() {
 }
 
 say() {
-	echo -e "${@}"
+	echo -e "$(timestamp): ${@}"
 }
 
 fail() {

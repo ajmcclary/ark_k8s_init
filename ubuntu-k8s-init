@@ -1,9 +1,9 @@
 #!/bin/bash
 SCRIPT="$(readlink -f "${BASH_SOURCE:-${0}}")"
-BASEDIR="$(dirname "${SCRIPT}")"
-SCRIPT="$(basename "${SCRIPT}")"
 
-SCRIPTS="${BASEDIR}/.scripts"
+export BASE_DIR="$(dirname "${SCRIPT}")"
+export SCRIPT_DIR="${BASE_DIR}/.scripts"
+export CONF_DIR="${BASE_DIR}/conf"
 
 list_kernels()
 {
@@ -49,9 +49,19 @@ if [ "$(/usr/bin/id -u)" != "0" ] ; then
 	chmod -R go-rwx ~/.kube
 
 	#
+	# Initialize the user-based stuff (i.e. helm repos+charts, support charts, etc)
+	#
+	"${SCRIPT_DIR}/init-user"
+
+	#
 	# Configure AWS CLI for the calling user
 	#
-	"${SCRIPTS}/init-aws-config"
+	"${SCRIPT_DIR}/init-aws-config"
+
+	#
+	# Wait for the pods to finish booting
+	#
+	"${SCRIPT_DIR}/wait-for-pods"
 
 	echo ""
 	echo ""
@@ -85,6 +95,12 @@ if [ "$(/usr/bin/id -u)" != "0" ] ; then
 
 	exit 0
 fi
+
+################################################################################
+#
+# EVERYTHING BELOW THIS POINT IS DONE WITH ELEVATED PRIVILEGES, SO BE CAREFUL!
+#
+################################################################################
 
 is_installed() {
 	local PKG="${1}"
@@ -240,11 +256,11 @@ else
 	(
 		echo "👉 Initializing the Kubernetes cluster node..."
 		set -euo pipefail
-		cd "${BASEDIR}"
+		cd "${BASE_DIR}"
 		( cd tools && tar -czf - . ) | tar -C /usr/local/bin -xzvf -
 		[ -v CLUSTER_CIDR ] && echo "	👉 CLUSTER_CIDR=[${CLUSTER_CIDR}]"
 		[ -v SERVICE_CIDR ] && echo "	👉 SERVICE_CIDR=[${SERVICE_CIDR}]"
-		./initialize
+		"${SCRIPT_DIR}/initialize"
 	)
 fi
 
@@ -269,4 +285,4 @@ fi
 #
 # Configure AWS CLI for root
 #
-"${SCRIPTS}/init-aws-config"
+"${SCRIPT_DIR}/init-aws-config"

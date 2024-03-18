@@ -1,0 +1,160 @@
+#!/bin/bash
+set -euo pipefail
+
+timestamp()
+{
+	/usr/bin/date -Ins -u
+}
+
+say() {
+	echo -e "$(timestamp): ${@}"
+}
+
+ok()
+{
+	say "✅ ${@}"
+}
+
+doing()
+{
+	say "👉 ${@}"
+}
+
+fail() {
+	say "❌ ${@}" 1>&2
+	exit ${EXIT_CODE:-1}
+}
+
+#
+# Make sure this runs as root
+#
+if [ "$(/usr/bin/id -u)" == "0" ] ; then
+	doing "Not running as root (or under sudo), must escalate privileges!"
+	exec /usr/bin/sudo -EH "${0}" "${@}"
+else
+	ok "Privilege check complete!"
+fi
+
+DEF_BOOT_TIMEOUT=90
+MIN_BOOT_TIMEOUT=15
+
+[ -v BASE_DIR ] || BASE_DIR=""
+[ -n "${BASE_DIR}" ] || fail "The BASE_DIR value is empty"
+[ -e "${BASE_DIR}" ] || fail "The script directory [${BASE_DIR}] does not exist"
+[ -d "${BASE_DIR}" ] || fail "The path [${BASE_DIR}] is not a directory"
+[ -r "${BASE_DIR}" ] || fail "The script directory [${BASE_DIR}] is not readable"
+[ -x "${BASE_DIR}" ] || fail "The script directory [${BASE_DIR}] is not executable"
+
+[ -v SCRIPT_DIR ] || SCRIPT_DIR=""
+[ -n "${SCRIPT_DIR}" ] || fail "The SCRIPT_DIR value is empty"
+[ -e "${SCRIPT_DIR}" ] || fail "The script directory [${SCRIPT_DIR}] does not exist"
+[ -d "${SCRIPT_DIR}" ] || fail "The path [${SCRIPT_DIR}] is not a directory"
+[ -r "${SCRIPT_DIR}" ] || fail "The script directory [${SCRIPT_DIR}] is not readable"
+[ -x "${SCRIPT_DIR}" ] || fail "The script directory [${SCRIPT_DIR}] is not executable"
+
+get_pod_ready_status() {
+	local PODS=""
+	local COUNT="0"
+	while true ; do
+		PODS="$(kubectl get pods -A -o json 2>/dev/null)" || true
+		[ -n "${PODS}" ] || PODS="{ }"
+
+		# Count the number of pods ... if it's 0, we need to wait and
+		# count again
+		COUNT="$(jq -r '(.items)? | length' <<< "${PODS}")" || true
+		if [ ${COUNT} -eq 0 ] ; then
+			sleep 1 || return 1
+			continue
+		fi
+
+		# Get the list of pods and their ready status ... if the list
+		# is empty, we need to wait and try again ...
+		PODS="$(echo -n "${PODS}" | jq -r '.items[] | "\(.metadata.namespace) \(.metadata.name) \(.status.conditions[] | select(.type == "Ready") .status)"' 2>/dev/null)" || true
+		if [ -z "${PODS}" ] ; then
+			sleep 1 || return 1
+			continue
+		fi
+
+		echo "${PODS}"
+		return 0
+	done
+}
+
+get_unready_pods() {
+	get_pod_ready_status | \
+		grep -v ' True$' | \
+		awk '{ printf("%s %s\n", $1, $2) }'
+}
+
+#
+# Initialize a single-node Kubernetes cluster
+#
+
+# [ -v CLUSTER_CIDR ] || export CLUSTER_CIDR="192.168.0.0/16"
+
+# For status tracking
+RC=0
+
+#
+# First, clean house
+#
+doing "Clearing out existing configurations"
+OUT="$("${BASE_DIR}/clear-node" 2>&1)" || RC=${?}
+[ ${RC} -eq 0 ] || fail "Failed clearing out the prior node configuration:\n${OUT}"
+ok "Existing configurations removed"
+
+#
+# Initialize Kubernetes
+#
+doing "Initializing the Kubernetes cluster"
+OUT="$("${SCRIPT_DIR}/init-node" 2>&1)" || RC=${?}
+[ ${RC} -eq 0 ] || fail "Failed during node initialization:\n${OUT}"
+ok "Cluster initialized"
+
+#
+# Add Calico
+#
+doing "Installing Calico"
+OUT="$("${BASEDIR}/init-calico" 2>&1)" || RC=${?}
+[ ${RC} -eq 0 ] || fail "Failed to install Calico: \n${OUT}"
+
+#
+# Add K8s dashboard
+#
+doing "Deploying the K8s dashboard"
+OUT="$(kubectl apply -f "${CONF_DIR}/k8s-dashboard.yaml" 2>&1)" || RC=${?}
+[ ${RC} -eq 0 ] || fail "Failed to install the K8s dashboard: \n${OUT}"
+
+#
+# Add K8s metrics
+#
+doing "Deploying the K8s metrics"
+OUT="$("${BASEDIR}/init-metrics" 2>&1)" || RC=${?}
+[ ${RC} -eq 0 ] || fail "Failed to install the K8s metrics: \n${OUT}"
+
+[ -v BOOT_TIMEOUT ] || BOOT_TIMEOUT=${DEF_BOOT_TIMEOUT}
+[[ "${BOOT_TIMEOUT}" =~ ^[1-9][0-9]*$ ]] || BOOT_TIMEOUT=${DEF_BOOT_TIMEOUT}
+[ ${BOOT_TIMEOUT} -ge ${MIN_BOOT_TIMEOUT} ] || BOOT_TIMEOUT=${MIN_BOOT_TIMEOUT}
+
+#
+# Wait for all pods to be ready, except the coredns pods
+#
+doing "Will wait up to ${BOOT_TIMEOUT} seconds for the initial boot sequence to complete"
+START="$(date +%s)"
+while true ; do
+	UNREADY="$(get_unready_pods | grep -v '^kube-system coredns-' | wc -l)" || true
+	[ -n ${UNREADY} ] || fail "Failed while waiting for the initial boot sequence to complete, please install Calico et al 'manually'"
+	[[ "${UNREADY}" =~ ^[0-9]+$ ]] || fail "Failed to count the unready pods, please install Calico et al 'manually'"
+
+	# If there are no unready pods, we just break...
+	[ ${UNREADY} -eq 0 ] && break
+
+	NOW=$(date +%s)
+	[ $(( NOW - START )) -lt ${BOOT_TIMEOUT} ] || fail "Timed out waiting for the initial boot sequence to complete, please install Calico et al 'manually'"
+
+	sleep 1 || fail "Waiting cycle canceled, please install Calico et al 'manually'"
+	echo -n "."
+done
+
+ok "Boot sequence complete!"
+exit 0

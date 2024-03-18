@@ -1,0 +1,72 @@
+#!/bin/bash
+SCRIPT="$(readlink -f "${0}")"
+BASEDIR="$(dirname "${SCRIPT}")"
+SOURCE="${BASH_SOURCE:-${0}}"
+
+set -euo pipefail
+
+timestamp()
+{
+	/usr/bin/date -Ins -u
+}
+
+say()
+{
+	echo -e "$(timestamp): ${@}"
+}
+
+ok()
+{
+	say "✅ ${@}"
+}
+
+doing()
+{
+	say "👉 ${@}"
+}
+
+fail() {
+	say "❌ ${@}" 1>&2
+	exit ${EXIT_CODE:-1}
+}
+
+[ -v CONF_DIR ] || fail "No configuration directory specified in CONF_DIR"
+[ -n "${CONF_DIR}" ] || fail "The value of CONF_DIR is empty"
+[ -e "${CONF_DIR}" ] || fail "The configuration [${CONF_DIR}] does not exist"
+[ -d "${CONF_DIR}" ] || fail "The path [${CONF_DIR}] is not a directory"
+[ -r "${CONF_DIR}" ] || fail "The configuration [${CONF_DIR}] is not readable"
+[ -x "${CONF_DIR}" ] || fail "The configuration [${CONF_DIR}] is not executable"
+
+# For status tracking
+RC=0
+
+#
+# Add HAProxy
+#
+doing "Installing HAProxy Ingress"
+OUT="$("${BASEDIR}/init-hap" "${CONF_DIR}/haproxy-ingress-values.yaml" 2>&1)" || RC=${?}
+[ ${RC} -eq 0 ] || fail "Failed to install HAProxy Ingress: \n${OUT}"
+
+#
+# Create the AWS pull secret on the main namespace, as a template
+#
+doing "Creating the aws-arkcase-pull template secret"
+OUT="$(kubectl apply -f "${CONF_DIR}/aws-arkcase-pull.yaml" 2>&1)" || RC=${?}
+[ ${RC} -eq 0 ] || fail "Failed to install the aws-arkcase-pull template secret: \n${OUT}"
+
+#
+# Add the ArkCase helm repository
+#
+doing "Adding the ArkCase Helm Repo"
+OUT="$(helm repo add arkcase https://arkcase.github.io/ark_helm_charts/ 2>&1)" || RC=${?}
+[ ${RC} -eq 0 ] || fail "Failed to install the ArkCase Helm Repository: \n${OUT}"
+
+#
+# Add the default storage class
+#
+doing "Installing the HostPath provisioner"
+OUT="$(helm upgrade --install --create-namespace --namespace hostpath-provisioner hostpath-provisioner arkcase/hostpath-provisioner)" || RC=${?}
+[ ${RC} -eq 0 ] || fail "Failed to install the HostPath provisioner: \n${OUT}"
+
+ok "Support resources deployed"
+exit 0

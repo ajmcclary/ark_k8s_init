@@ -28,7 +28,8 @@ fi
 
 [ -n "${INGRESS_CLASS_NAME}" ] || INGRESS_CLASS_NAME="haproxy"
 
-[ -v DEFAULT ] || DEFAULT="false"
+[ -v DEFAULT ] || DEFAULT=""
+[ -n "${DEFAULT}" ] || DEFAULT="true"
 case "${DEFAULT,,}" in
 	true | t | yes | y | 1 ) DEFAULT="true" ;;
 	* ) DEFAULT="false" ;;
@@ -51,7 +52,7 @@ spec:
     name: "${HAP_APP_NAME}"
 EOF
 
-echo_run helm install \
+echo_run helm upgrade --install \
 	"${HAP_APP_NAME}" \
 	haproxy-ingress/haproxy-ingress \
 	--create-namespace --namespace "${HAP_APP_NS}" \
