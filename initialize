@@ -1,16 +1,41 @@
 #!/bin/bash
 SCRIPT="$(readlink -f "${BASH_SOURCE:-${0}}")"
 
+set -euo pipefail
+
 export BASE_DIR="$(dirname "${SCRIPT}")"
 export SCRIPT_DIR="${BASE_DIR}/.scripts"
 export CONF_DIR="${BASE_DIR}/conf"
+
+timestamp()
+{
+	/usr/bin/date -Ins -u
+}
+
+say()
+{
+	echo -e "$(timestamp): ${@}"
+}
+
+ok()
+{
+	say "✅ ${@}"
+}
+
+doing()
+{
+	say "👉 ${@}"
+}
+
+fail() {
+	say "❌ ${@}" 1>&2
+	exit ${EXIT_CODE:-1}
+}
 
 list_kernels()
 {
 	dpkg -l | egrep "linux-image-[56]" | awk '{ print $2 }' | sort -u
 }
-
-set -euo pipefail
 
 if [ "$(/usr/bin/id -u)" != "0" ] ; then
 
@@ -26,9 +51,9 @@ if [ "$(/usr/bin/id -u)" != "0" ] ; then
 	#
 	# Do the rooty-things
 	#
-	echo "👉 Not running as root, must escalate privileges!"
-	sudo -EH "${0}" "${@}" || { echo "	❌ Root installation tasks failed (rc=${?})!" ; exit 1 ; }
-	echo "	✅ Root portions completed!"
+	doing "Not running as root, must escalate privileges!"
+	sudo -EH "${0}" "${@}" || fail "Root installation tasks failed (rc=${?})!"
+	ok "Root portions completed!"
 
 	#
 	# Take stock of the new kernel versions installed
@@ -42,11 +67,13 @@ if [ "$(/usr/bin/id -u)" != "0" ] ; then
 	#
 	# Set up the K8s configuration
 	#
-	echo "👉 Configuring your K8s cluster settings"
+	doing "Configuring your K8s cluster settings"
 	mkdir -p ~/.kube
 	sudo cat /etc/kubernetes/admin.conf > ~/.kube/config
 	chown -R "${USER}:" ~/.kube
 	chmod -R go-rwx ~/.kube
+	kubectl config get-contexts
+	ok "Cluster access configured"
 
 	#
 	# Initialize the user-based stuff (i.e. helm repos+charts, support charts, etc)
@@ -66,30 +93,25 @@ if [ "$(/usr/bin/id -u)" != "0" ] ; then
 	echo ""
 	echo ""
 	echo ""
-	echo "	✅ Installation completed. You should now be able to operate"
-	echo "	  Docker and Kubernetes locally"
+	ok "Installation completed. You should now be able to operate Docker and Kubernetes locally"
 	echo ""
 
 	if docker ps -a &>/dev/null ; then
-		echo "	✅ Docker control is enabled"
+		ok "Docker control is enabled"
 	else
-		echo "	❌ Your group memberships haven't been updated, you must"
-		echo "	  log out and back in to enable control of Docker"
+		err "Your group memberships haven't been updated, you must log out and back in to enable control of Docker"
 	fi
 	echo ""
 
 	if kubectl get pods -A &>/dev/null ; then
-		echo "	✅ Kubernetes control is enabled"
+		ok "Kubernetes control is enabled"
 	else
-		echo "	❌ Your Kubernetes configuration seems to be incorrect,"
-		echo "	  please fix it before continuing. Feel free to ask for"
-		echo "	  help if you feel it's necessary."
+		err "Your Kubernetes configuration seems to be incorrect, please fix it before continuing. Feel free to ask for help if you feel it's necessary."
 	fi
 	echo ""
 
 	if [ "${OLD_KERNELS}" != "${NEW_KERNELS}" ] ; then
-		echo "	👉 New kernels were installed, it's strongly recommended that you"
-		echo "	  reboot to ensure the latest software is running."
+		doing "New kernels were installed, it's strongly recommended that you reboot to ensure the latest software is running."
 		echo ""
 	fi
 
@@ -111,12 +133,12 @@ is_installed() {
 TRUSTED_GPG_DIR="/etc/apt/trusted.gpg.d"
 APT_SOURCES_DIR="/etc/apt/sources.list.d"
 
-[ -v SUDO_USER ] && echo "✅ Privileges escalated! Proceeding with the installation"
+[ -v SUDO_USER ] && ok "Privileges escalated! Proceeding with the installation"
 
 #
 # Full updates
 #
-echo "👉 Performing a full package update..."
+doing "Performing a full package update..."
 apt-get update && apt-get -f -y dist-upgrade && apt-get clean
 
 #
@@ -142,9 +164,9 @@ for P in "${EXTRA_PACKAGES[@]}" ; do
 	is_installed "${P}" || MISSING_PACKAGES+=("${P}")
 done
 if [ ${#MISSING_PACKAGES[@]} -eq 0 ] ; then
-	echo "✅ All required packages are installed"
+	ok "All required packages are installed"
 else
-	echo "👉 Installing extra packages: [${MISSING_PACKAGES[@]}]..."
+	doing "Installing extra packages: [${MISSING_PACKAGES[@]}]..."
 	apt-get install -y "${MISSING_PACKAGES[@]}"
 fi
 
@@ -152,9 +174,9 @@ fi
 # Disable swap
 #
 if [ -z "$(swapon --show --noheadings --raw)" ] ; then
-	echo "✅ Swap is disabled as required by Kubernetes"
+	ok "Swap is disabled as required by Kubernetes"
 else
-	echo "👉 Disabling swap (required by Kubernetes)"
+	doing "Disabling swap (required by Kubernetes)"
 	swapoff -a
 	grep -v "[[:space:]]swap[[:space:]]" /etc/fstab | sponge /etc/fstab
 fi
@@ -162,16 +184,11 @@ fi
 #
 # Install and configure Docker
 #
-if docker ps -a &>/dev/null ; then
-	echo "✅ Docker is already installed and running"
-else
-
-	if is_installed docker ; then
-		echo "✅ Docker is already installed"
-	else
+if ! docker ps -a &>/dev/null ; then
+	if ! is_installed docker ; then
 		[ -v DOCKER_DISTRO ] || DOCKER_DISTRO=""
 		[ -n "${DOCKER_DISTRO}" ] || DOCKER_DISTRO="jammy"
-		echo "👉 Installing Docker..."
+		doing "Installing Docker..."
 		rm -f "${TRUSTED_GPG_DIR}/docker.gpg" &>/dev/null || true
 		curl -fsSL "https://download.docker.com/linux/ubuntu/gpg" | gpg --dearmor -o "${TRUSTED_GPG_DIR}/docker.gpg"
 		chmod a+r "${TRUSTED_GPG_DIR}/docker.gpg"
@@ -191,70 +208,67 @@ else
 		apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 		[ -v SUDO_USER ] && usermod -a -G docker "${SUDO_USER}"
 	fi
+	ok "Docker is already installed"
 
-	echo "👉 Enabling the Docker service..."
+	doing "Enabling the Docker service..."
 	systemctl enable --now docker.service docker.socket
 	docker run hello-world
 fi
+ok "Docker is installed and running"
 
-if systemctl is-active --quiet cri-docker.service  ; then
-	echo "✅ CRI-Docker is already installed and running"
-else
-	if is_installed cri-dockerd ; then
-		echo "✅ CRI-Docker is already installed"
-	else
+if ! systemctl is-active --quiet cri-docker.service  ; then
+	if ! is_installed cri-dockerd ; then
 		[ -v CRI_VER ] || CRI_VER=""
 		[ -n "${CRI_VER}" ] || CRI_VER="0.3.4"
 		[ -v CRI_DISTRO ] || CRI_DISTRO=""
 		[ -n "${CRI_DISTRO}" ] || CRI_DISTRO="jammy"
-		echo "👉 Installing CRI-Docker v${CRI_VER} (${CRI_DISTRO})..."
+		doing "Installing CRI-Docker v${CRI_VER} (${CRI_DISTRO})..."
 		wget "https://github.com/Mirantis/cri-dockerd/releases/download/v${CRI_VER}/cri-dockerd_${CRI_VER}.3-0.ubuntu-${CRI_DISTRO}_amd64.deb"
 		apt-get install -y "./cri-dockerd_${CRI_VER}.3-0.ubuntu-${CRI_DISTRO}_amd64.deb"
 		rm -rf "./cri-dockerd_${CRI_VER}.3-0.ubuntu-${CRI_DISTRO}_amd64.deb" || true
 	fi
-	echo "👉 Enabling CRI-Docker..."
+	ok "CRI-Docker is installed"
+
+	doing "Enabling CRI-Docker..."
 	systemctl enable --now cri-docker.service cri-docker.socket
 	# This will verify that it's running
 	systemctl is-active --quiet cri-docker.service
 fi
+ok "CRI-Docker is installed and running"
 
 #
 # Install Helm
 #
-if helm version &>/dev/null ; then
-	echo "✅ Helm is already installed"
-else
+if ! helm version &>/dev/null ; then
 	[ -v HELM_VER ] || HELM_VER=""
 	[ -n "${HELM_VER}" ] || HELM_VER="3.12.3"
-	echo "👉 Installing Helm v${HELM_VER}..."
+	doing "Installing Helm v${HELM_VER}..."
 	curl -fsSL https://get.helm.sh/helm-v${HELM_VER}-linux-amd64.tar.gz | tar -C /usr/local/bin --strip-components=1 -xzvf - linux-amd64/helm
 	helm version &>/dev/null
 fi
+ok "Helm is installed"
 
 #
 # Install Kubernetes
 #
-if kubeadm version &>/dev/null ; then
-	echo "✅ Kubernetes already installed"
-else
+if ! kubeadm version &>/dev/null ; then
 	[ -v K8S_VER ] || K8S_VER=""
 	[ -n "${K8S_VER}" ] || K8S_VER="1.28"
-	echo "👉 Installing Kubernetes v${K8S_VER}..."
+	doing "Installing Kubernetes v${K8S_VER}..."
 	rm -f "${TRUSTED_GPG_DIR}/kubernetes.gpg" &>/dev/null || true
 	curl -fsSL "https://pkgs.k8s.io/core:/stable:/v${K8S_VER}/deb/Release.key" | gpg --dearmor -o "${TRUSTED_GPG_DIR}/kubernetes.gpg"
 	echo "deb https://pkgs.k8s.io/core:/stable:/v${K8S_VER}/deb/ /" > "${APT_SOURCES_DIR}/kubernetes.list"
 	apt-get update
 	apt-get install -y kubelet kubeadm kubectl
 fi
+ok "Kubernetes is installed"
 
 #
 # Initialize the K8s node
 #
-if kubectl get pods -A &>/dev/null ; then
-	echo "✅ The Kubernetes node is already initialized"
-else
+if ! kubectl get pods -A &>/dev/null ; then
 	(
-		echo "👉 Initializing the Kubernetes cluster node..."
+		doing "Initializing the Kubernetes cluster node..."
 		set -euo pipefail
 		cd "${BASE_DIR}"
 		( cd tools && tar -czf - . ) | tar -C /usr/local/bin -xzvf -
@@ -263,15 +277,14 @@ else
 		"${SCRIPT_DIR}/initialize"
 	)
 fi
+ok "The Kubernetes node is initialized"
 
 #
 # Install AWS CLI
 #
-if aws --version &>/dev/null ; then
-	echo "✅ AWS CLI already installed"
-else
+if ! aws --version &>/dev/null ; then
 	(
-		echo "👉 Installing AWS CLI..."
+		doing "Installing AWS CLI..."
 		set -euo pipefail
 		cd
 		curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
@@ -281,6 +294,7 @@ else
 		aws --version
 	)
 fi
+ok "AWS CLI is installed"
 
 #
 # Configure AWS CLI for root
