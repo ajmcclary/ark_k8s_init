@@ -47,11 +47,42 @@ region = us-east-1
 EOF
 echo "✅ Profile added!"
 
-echo "👉 Please remember to add the AWS credentials to the credentials file at [${AWS_CREDS}], like so:"
-cat <<-EOF
+CREDS="${BASEDIR}/aws-marketplace.bin"
 
-[${AWS_PROFILE}]
-aws_access_key_id=\${YOUR_AWS_ACCESS_KEY_ID}
-aws_secret_access_key=\${YOUR_AWS_SECRET_ACCESS_KEY}
+if [ -f "${CREDS}" ] ; then
+	echo "🔑 Decrypting the AWS credentials..."
+	if CREDS="$(openssl aes-256-cbc -a -A -d -salt -iter 1000 -in "${CREDS}")" ; then
+		if [ -f "${AWS_CREDS}" ] ; then
+			echo "✅ The AWS credentials are already created at [${AWS_CREDS}] for user ${CURRENT_USER}..."
 
-EOF
+			# Remove any existing "armedia-marketplace" profiles
+			echo "👉 Removing the existing ${AWS_PROFILE} profile from the AWS credentials..."
+			sed -i \
+				-e '/^\s*\[\s*'"${AWS_PROFILE}"'\s*\]\s*$/,/^\s*\[/{/^\s*\[\s*'"${AWS_PROFILE}"'\s*\]\s*$/d;/^\s*\[/!d}' \
+				"${AWS_CREDS}"
+		fi
+		cat <<-EOF >> "${AWS_CREDS}"
+
+		[${AWS_PROFILE}]
+		${CREDS}
+
+		EOF
+		echo "🔓 Credentials decrypted and configured!"
+	else
+		echo "❌ Unable to decrypt the credentials for AWS..."
+		CREDS=""
+	fi
+else
+	CREDS=""
+fi
+
+if [ -z "${CREDS}" ] ; then
+	echo "👉 Please remember to add the AWS credentials to the credentials file at [${AWS_CREDS}], like so:"
+	cat <<-EOF
+
+	[${AWS_PROFILE}]
+	aws_access_key_id=\${YOUR_AWS_ACCESS_KEY_ID}
+	aws_secret_access_key=\${YOUR_AWS_SECRET_ACCESS_KEY}
+
+	EOF
+fi
