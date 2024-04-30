@@ -28,7 +28,7 @@ fail() {
 #
 # Make sure this runs as root
 #
-if [ "$(/usr/bin/id -u)" == "0" ] ; then
+if [ "$(/usr/bin/id -u)" != "0" ] ; then
 	doing "Not running as root (or under sudo), must escalate privileges!"
 	exec /usr/bin/sudo -EH "${0}" "${@}"
 else
@@ -115,7 +115,7 @@ ok "Cluster initialized"
 # Add Calico
 #
 doing "Installing Calico"
-OUT="$("${BASEDIR}/init-calico" 2>&1)" || RC=${?}
+OUT="$("${SCRIPT_DIR}/init-calico" 2>&1)" || RC=${?}
 [ ${RC} -eq 0 ] || fail "Failed to install Calico: \n${OUT}"
 
 #
@@ -129,7 +129,7 @@ OUT="$(kubectl apply -f "${CONF_DIR}/k8s-dashboard.yaml" 2>&1)" || RC=${?}
 # Add K8s metrics
 #
 doing "Deploying the K8s metrics"
-OUT="$("${BASEDIR}/init-metrics" 2>&1)" || RC=${?}
+OUT="$("${SCRIPT_DIR}/init-metrics" 2>&1)" || RC=${?}
 [ ${RC} -eq 0 ] || fail "Failed to install the K8s metrics: \n${OUT}"
 
 [ -v BOOT_TIMEOUT ] || BOOT_TIMEOUT=${DEF_BOOT_TIMEOUT}
