@@ -43,7 +43,6 @@ cat <<-EOF >> "${AWS_CONFIG}"
 
 [profile ${AWS_PROFILE}]
 region = us-east-1
-
 EOF
 echo "✅ Profile added!"
 
@@ -62,10 +61,8 @@ if [ -f "${CREDS}" ] ; then
 				"${AWS_CREDS}"
 		fi
 		cat <<-EOF >> "${AWS_CREDS}"
-
 		[${AWS_PROFILE}]
 		${CREDS}
-
 		EOF
 		echo "🔓 Credentials decrypted and configured!"
 	else
@@ -79,10 +76,9 @@ fi
 if [ -z "${CREDS}" ] ; then
 	echo "👉 Please remember to add the AWS credentials to the credentials file at [${AWS_CREDS}], like so:"
 	cat <<-EOF
-
 	[${AWS_PROFILE}]
 	aws_access_key_id=\${YOUR_AWS_ACCESS_KEY_ID}
 	aws_secret_access_key=\${YOUR_AWS_SECRET_ACCESS_KEY}
-
 	EOF
 fi
+exit 0
