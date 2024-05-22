@@ -5,11 +5,32 @@ SCRIPT="$(basename "${SCRIPT}")"
 
 set -euo pipefail
 
+timestamp()
+{
+	date -Ins -u
+}
+
+say()
+{
+	echo -e "$(timestamp): ${@}"
+}
+
+err()
+{
+	say "❌ ${@}"
+}
+
+fail()
+{
+	err "${@}"
+	exit ${EXIT_CODE:-1}
+}
+
 CURRENT_USER="$(id -un)"
 HOME="$(eval echo ~${CURRENT_USER})"
 
 if [ ! -d "${HOME}" ] ; then
-	echo "❌ No home directory [${HOME}] for user [${CURRENT_USER}] ... can't configure AWS"
+	err "❌ No home directory [${HOME}] for user [${CURRENT_USER}] ... can't configure AWS"
 	exit 0
 fi
 
@@ -21,16 +42,16 @@ fi
 [ -v AWS_PROFILE ] || AWS_PROFILE="armedia-marketplace"
 
 if [ -f "${AWS_CONFIG}" ] ; then
-	echo "✅ The AWS configuration is already created at [${AWS_CONFIG}] for user ${CURRENT_USER}..."
+	say "✅ The AWS configuration is already created at [${AWS_CONFIG}] for user ${CURRENT_USER}..."
 
 	# Remove any existing "armedia-marketplace" profiles
-	echo "👉 Removing the existing ${AWS_PROFILE} profile from the AWS configuration..."
+	say "👉 Removing the existing ${AWS_PROFILE} profile from the AWS configuration..."
 	sed -i \
 		-e '/^\s*\[\s*profile\s\+'"${AWS_PROFILE}"'\s*\]\s*$/,/^\s*\[/{/^\s*\[\s*profile\s\+'"${AWS_PROFILE}"'\s*\]\s*$/d;/^\s*\[/!d}' \
 		-e '/^\s*\[\s*'"${AWS_PROFILE}"'\s*\]\s*$/,/^\s*\[/{/^\s*\[\s*'"${AWS_PROFILE}"'\s*\]\s*$/d;/^\s*\[/!d}' \
 		"${AWS_CONFIG}"
 else
-	echo "👉 Creating your AWS configuration for user ${CURRENT_USER}..."
+	say "👉 Creating your AWS configuration for user ${CURRENT_USER}..."
 	mkdir -p "$(dirname "${AWS_CONFIG}")"
 	cat <<-EOF > "${AWS_CONFIG}"
 	[default]
@@ -38,24 +59,24 @@ else
 	EOF
 fi
 
-echo "👉 Adding the ${AWS_PROFILE} profile to the AWS configuration at [${AWS_CONFIG}]..."
+say "👉 Adding the ${AWS_PROFILE} profile to the AWS configuration at [${AWS_CONFIG}]..."
 cat <<-EOF >> "${AWS_CONFIG}"
 
 [profile ${AWS_PROFILE}]
 region = us-east-1
 EOF
-echo "✅ Profile added!"
+say "✅ Profile added!"
 
 CREDS="${BASEDIR}/aws-marketplace.bin"
 
 if [ -f "${CREDS}" ] ; then
-	echo "🔑 Decrypting the AWS credentials..."
+	say "🔑 Decrypting the AWS credentials..."
 	if CREDS="$(openssl aes-256-cbc -a -A -d -salt -iter 1000 -in "${CREDS}")" ; then
 		if [ -f "${AWS_CREDS}" ] ; then
-			echo "✅ The AWS credentials are already created at [${AWS_CREDS}] for user ${CURRENT_USER}..."
+			say "✅ The AWS credentials are already created at [${AWS_CREDS}] for user ${CURRENT_USER}..."
 
 			# Remove any existing "armedia-marketplace" profiles
-			echo "👉 Removing the existing ${AWS_PROFILE} profile from the AWS credentials..."
+			say "👉 Removing the existing ${AWS_PROFILE} profile from the AWS credentials..."
 			sed -i \
 				-e '/^\s*\[\s*'"${AWS_PROFILE}"'\s*\]\s*$/,/^\s*\[/{/^\s*\[\s*'"${AWS_PROFILE}"'\s*\]\s*$/d;/^\s*\[/!d}' \
 				"${AWS_CREDS}"
@@ -64,9 +85,9 @@ if [ -f "${CREDS}" ] ; then
 		[${AWS_PROFILE}]
 		${CREDS}
 		EOF
-		echo "🔓 Credentials decrypted and configured!"
+		say "🔓 Credentials decrypted and configured!"
 	else
-		echo "❌ Unable to decrypt the credentials for AWS..."
+		err "Unable to decrypt the credentials for AWS..."
 		CREDS=""
 	fi
 else
@@ -74,7 +95,7 @@ else
 fi
 
 if [ -z "${CREDS}" ] ; then
-	echo "👉 Please remember to add the AWS credentials to the credentials file at [${AWS_CREDS}], like so:"
+	say "👉 Please remember to add the AWS credentials to the credentials file at [${AWS_CREDS}], like so:"
 	cat <<-EOF
 	[${AWS_PROFILE}]
 	aws_access_key_id=\${YOUR_AWS_ACCESS_KEY_ID}
