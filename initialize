@@ -280,6 +280,15 @@ fi
 ok "The Kubernetes node is initialized"
 
 #
+# Configure the local DNS stuff
+#
+(
+	doing "Initializing the local DNS resolver to connect to the cluster..."
+	set -euo pipefail
+	"${SCRIPT_DIR}/init-local-dns"
+)
+
+#
 # Install AWS CLI
 #
 if ! aws --version &>/dev/null ; then

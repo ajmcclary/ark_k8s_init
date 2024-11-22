@@ -155,6 +155,7 @@ while true ; do
 	sleep 1 || fail "Waiting cycle canceled, please install Calico et al 'manually'"
 	echo -n "."
 done
+echo ""
 
 ok "Boot sequence complete!"
 exit 0
