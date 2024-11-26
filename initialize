@@ -73,13 +73,7 @@ if [ "$(/usr/bin/id -u)" != "0" ] ; then
 	#
 	# Set up the K8s configuration
 	#
-	doing "Configuring your K8s cluster settings"
-	mkdir -p ~/.kube
-	sudo cat /etc/kubernetes/admin.conf > ~/.kube/config
-	chown -R "${USER}:" ~/.kube
-	chmod -R go-rwx ~/.kube
-	kubectl config get-contexts
-	ok "Cluster access configured"
+	"${SCRIPT_DIR}/init-kubeconfig"
 
 	#
 	# Initialize the user-based stuff (i.e. helm repos+charts, support charts, etc)
