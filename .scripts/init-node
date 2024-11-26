@@ -28,7 +28,8 @@ cleanup()
 	fi
 }
 
-echo_run() {
+echo_run()
+{
 	local ARGS=("${@}")
 	echo "${ARGS[@]@Q}"
 	"${@}"
@@ -44,7 +45,7 @@ for SOCKET in "${CRI_SOCKETS[@]}" ; do
 		break
 	fi
 done
-[ -n "${CRI}" ] || { echo "❌ Failed to find the CRI socket from the candidates [${CRI_SOCKETS[@]}]" ; exit 1 ; }
+[ -n "${CRI}" ] || fail "❌ Failed to find the CRI socket from the candidates [${CRI_SOCKETS[@]}]"
 
 [ -v CLUSTER_CIDR ] || CLUSTER_CIDR="10.96.0.0/12"
 [ -v SERVICE_CIDR ] || SERVICE_CIDR="${CLUSTER_CIDR}"
@@ -190,6 +191,16 @@ fi
 
 KUBEADM_CONFIG_FILE="$(mktemp --suffix=.yaml)"
 echo "${KUBEADM_CONFIG}" > "${KUBEADM_CONFIG_FILE}"
+
+# Ensure we have br_netfilter
+modprobe br_netfilter || fail "Failed to install the netfilter bridging module"
+K8S_SYSCTL="/etc/sysctl.d/99-kubernetes.conf"
+cat <<EOF > "${K8S_SYSCTL}"
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+net.ipv4.ip_forward = 1
+EOF
+echo_run sysctl -p "${K8S_SYSCTL}" || fail "Failed to enable network bridging"
 
 # Next, init the cluster
 echo_run kubeadm init \
