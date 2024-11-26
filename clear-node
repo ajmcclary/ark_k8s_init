@@ -15,7 +15,8 @@ for SOCKET in "${CRI_SOCKETS[@]}" ; do
 	fi
 done
 
-echo_run() {
+echo_run()
+{
 	local ARGS=("${@}")
 	echo "${ARGS[@]@Q}"
 	"${@}"
@@ -24,7 +25,11 @@ echo_run() {
 # Clean house
 echo_run kubeadm reset -f "${CRI[@]}"
 [ -d /etc/cni/net.d ] && rm -rf /etc/cni/net.d
-[ -d ~/.kube ] && rm -rf ~/.kube
+if [ -f "${HOME}/.kube/config" ] ; then
+	for n in context cluster user ; do
+		kubectl config delete-$n local || true
+	done
+fi
 rm -f /usr/local/share/ca-certificates/k8s-ca.crt
 
 CA_UPDATER=(update-ca-trust update-ca-certificates)
@@ -42,10 +47,17 @@ if nmcli con show "${CONN}" &>/dev/null ; then
 	echo_run nmcli con del "${CONN}"
 fi
 
+SYSTEMD_DIR="/etc/systemd"
+
 IFACE="kubelocal0"
-rm -rf "/etc/systemd/network/10-${IFACE}".net* &>/dev/null || true
-if systemctl status systemd-networkd.service &>/dev/null ; then
+NETWORK_DIR="${SYSTEMD_DIR}/network"
+rm -rvf "${NETWORK_DIR}/10-${IFACE}".net* &>/dev/null || true
+systemctl status systemd-networkd.service &>/dev/null && \
 	echo_run systemctl restart systemd-networkd.service
-fi
+
+RESOLVE_DIR="${SYSTEMD_DIR}/resolved.conf.d"
+rm -rvf "${RESOLVE_DIR}"/k8s-*.conf "${RESOLVE_DIR}/00-listen-on-${IFACE}.conf"
+systemctl status systemd-resolved.service &>/dev/null && \
+	echo_run systemctl restart systemd-resolved.service
 
 echo_run systemctl stop kubelet

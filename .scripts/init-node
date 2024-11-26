@@ -221,9 +221,8 @@ for updater in "${CA_UPDATER[@]}" ; do
 	fi
 done
 
-echo_run mkdir -p "${HOME}/.kube" || true
-echo_run cp -vi /etc/kubernetes/admin.conf "${HOME}/.kube/config"
-echo_run chown -v $(id -u):$(id -g) "${HOME}/.kube/config"
+# Set up the kubeconfig stuff
+"${BASEDIR}/init-kubeconfig"
 
 # This will need to be run after each added node
 echo_run kubectl taint nodes --all node-role.kubernetes.io/master- || true
