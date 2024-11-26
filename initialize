@@ -27,8 +27,14 @@ doing()
 	say "👉 ${@}"
 }
 
-fail() {
-	say "❌ ${@}" 1>&2
+err()
+{
+	say "❌ ${@}"
+}
+
+fail()
+{
+	err "${@}" 1>&2
 	exit ${EXIT_CODE:-1}
 }
 
@@ -124,7 +130,8 @@ fi
 #
 ################################################################################
 
-is_installed() {
+is_installed()
+{
 	local PKG="${1}"
 	apt -qq list "${PKG}" --installed 2>/dev/null | fgrep -q  "[installed]" && return 0
 	return 1
@@ -152,7 +159,6 @@ EXTRA_PACKAGES=(
 	gnupg
 	jq
 	moreutils
-	netcat
 	net-tools
 	procps
 	screen
