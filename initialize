@@ -259,7 +259,7 @@ ok "Helm is installed"
 #
 if ! kubeadm version &>/dev/null ; then
 	[ -v K8S_VER ] || K8S_VER=""
-	[ -n "${K8S_VER}" ] || K8S_VER="1.28"
+	[ -n "${K8S_VER}" ] || K8S_VER="1.30"
 	doing "Installing Kubernetes v${K8S_VER}..."
 	rm -f "${TRUSTED_GPG_DIR}/kubernetes.gpg" &>/dev/null || true
 	curl -fsSL "https://pkgs.k8s.io/core:/stable:/v${K8S_VER}/deb/Release.key" | gpg --dearmor -o "${TRUSTED_GPG_DIR}/kubernetes.gpg"
