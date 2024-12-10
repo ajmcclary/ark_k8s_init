@@ -5,7 +5,8 @@ SCRIPT="$(basename "${SCRIPT}")"
 
 set -e -o pipefail
 
-echo_run() {
+echo_run()
+{
 	local ARGS=("${@}")
 	echo "${ARGS[@]@Q}"
 	"${@}"

@@ -22,7 +22,8 @@ fail()
 	exit ${EXIT_CODE:-1}
 }
 
-get_pod_ready_status() {
+get_pod_ready_status()
+{
 	local PODS=""
 	local COUNT="0"
 	while true ; do
@@ -50,7 +51,8 @@ get_pod_ready_status() {
 	done
 }
 
-get_unready_pods() {
+get_unready_pods()
+{
 	get_pod_ready_status | \
 		grep -v ' True$' | \
 		awk '{ printf("%s %s\n", $1, $2) }'

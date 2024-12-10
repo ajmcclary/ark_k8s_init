@@ -6,7 +6,8 @@ timestamp()
 	/usr/bin/date -Ins -u
 }
 
-say() {
+say()
+{
 	echo -e "$(timestamp): ${@}"
 }
 
@@ -20,7 +21,8 @@ doing()
 	say "👉 ${@}"
 }
 
-fail() {
+fail()
+{
 	say "❌ ${@}" 1>&2
 	exit ${EXIT_CODE:-1}
 }
@@ -52,7 +54,8 @@ MIN_BOOT_TIMEOUT=15
 [ -r "${SCRIPT_DIR}" ] || fail "The script directory [${SCRIPT_DIR}] is not readable"
 [ -x "${SCRIPT_DIR}" ] || fail "The script directory [${SCRIPT_DIR}] is not executable"
 
-get_pod_ready_status() {
+get_pod_ready_status()
+{
 	local PODS=""
 	local COUNT="0"
 	while true ; do
@@ -80,7 +83,8 @@ get_pod_ready_status() {
 	done
 }
 
-get_unready_pods() {
+get_unready_pods()
+{
 	get_pod_ready_status | \
 		grep -v ' True$' | \
 		awk '{ printf("%s %s\n", $1, $2) }'

@@ -25,7 +25,8 @@ doing()
 	say "👉 ${@}"
 }
 
-fail() {
+fail()
+{
 	say "❌ ${@}" 1>&2
 	exit ${EXIT_CODE:-1}
 }
