@@ -52,7 +52,7 @@ OUT="$("${BASEDIR}/init-hap" "${CONF_DIR}/haproxy-ingress-values.yaml" 2>&1)" ||
 # Create the AWS pull secret on the main namespace, as a template
 #
 doing "Creating the aws-arkcase-pull template secret"
-OUT="$(kubectl apply -f "${CONF_DIR}/aws-arkcase-pull.yaml" 2>&1)" || RC=${?}
+OUT="$(kubectl --context "local" apply -f "${CONF_DIR}/aws-arkcase-pull.yaml" 2>&1)" || RC=${?}
 [ ${RC} -eq 0 ] || fail "Failed to install the aws-arkcase-pull template secret: \n${OUT}"
 
 #
@@ -66,7 +66,7 @@ OUT="$(helm repo add arkcase https://arkcase.github.io/ark_helm_charts/ 2>&1)" |
 # Add the default storage class
 #
 doing "Installing the HostPath provisioner"
-OUT="$(helm upgrade --install --create-namespace --namespace hostpath-provisioner hostpath-provisioner arkcase/hostpath-provisioner)" || RC=${?}
+OUT="$(helm --kube-context "local" upgrade --install --create-namespace --namespace hostpath-provisioner hostpath-provisioner arkcase/hostpath-provisioner)" || RC=${?}
 [ ${RC} -eq 0 ] || fail "Failed to install the HostPath provisioner: \n${OUT}"
 
 ok "Support resources deployed"

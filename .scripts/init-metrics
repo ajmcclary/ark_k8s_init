@@ -21,4 +21,4 @@ METRICS_FILE="components.yaml"
 echo "Downloading the metrics version file..."
 YAML="$(curl -fsSL "${METRICS_URL}")" || { echo "Failed to download the metrics yaml" ; exit 1 ; }
 echo "Creating the metrics resources"
-echo_run kubectl apply -f - < <(echo "${YAML}" | sed '/--metric-resolution=/a \ \ \ \ \ \ \ \ - --kubelet-insecure-tls')
+echo_run kubectl --context "local" apply -f - < <(echo "${YAML}" | sed '/--metric-resolution=/a \ \ \ \ \ \ \ \ - --kubelet-insecure-tls')

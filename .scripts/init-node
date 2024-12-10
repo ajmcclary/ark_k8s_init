@@ -225,10 +225,10 @@ done
 "${BASEDIR}/init-kubeconfig"
 
 # This will need to be run after each added node
-echo_run kubectl taint nodes --all node-role.kubernetes.io/master- || true
+echo_run kubectl --context "local" taint nodes --all node-role.kubernetes.io/master- || true
 # ONLY FOR SINGLE-NODE CLUSTERS
-echo_run kubectl taint nodes --all node-role.kubernetes.io/control-plane- || true
+echo_run kubectl --context "local" taint nodes --all node-role.kubernetes.io/control-plane- || true
 
 # Some short display stuff
-echo_run kubectl get nodes
-echo_run kubectl get pods --all-namespaces
+echo_run kubectl --context "local" get nodes
+echo_run kubectl --context "local" get pods --all-namespaces

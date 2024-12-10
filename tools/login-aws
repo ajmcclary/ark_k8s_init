@@ -7,20 +7,24 @@ set -euo pipefail
 [ -v K8S_SECRET ] || K8S_SECRET="aws-arkcase-pull"
 [ -v AWS_USERNAME ] || AWS_USERNAME="AWS"
 
-say() {
+say()
+{
 	echo -e "${@}"
 }
 
-fail() {
+fail()
+{
 	say "${@}" 1>&2
 	exit ${EXIT_CODE:-1}
 }
 
-usage() {
+usage()
+{
 	fail "usage: ${BASH_ARGV0:-${BASH_SOURCE:-${0}}} (- | stdin | sso | local | help) [profile:...] [secret:...] [region:...]"
 }
 
-update_from_stdin() {
+update_from_stdin()
+{
 	say "Please enter the AWS credentials info for profile [${AWS_PROFILE}] (copy+paste)"
 	local CREDS="$(cat | grep -v '^[[:space:]]*$' | grep -v "^[[:space:]]*\[")"
 	[ -n "${CREDS}" ] || fail "Empty credentials, can't continue"
@@ -143,23 +147,23 @@ docker login --username "${AWS_USERNAME}" --password-stdin "${HOST}" <<< "${PASS
 RC=${?}
 [ ${RC} -eq 0 ] || exit ${RC}
 
-if kubectl get node &>/dev/null ; then
+if kubectl --context "local" get node &>/dev/null ; then
 	DOCKER_CONFIG="$(readlink -f ~/.docker/config.json 2>/dev/null)"
 	if [ -n "${DOCKER_CONFIG}" ] && [ -f "${DOCKER_CONFIG}" ] ; then
 		say "Creating Kubernetes secret (${K8S_SECRET}) for [${DOCKER_CONFIG}]..."
 		while read NS ; do
-			[ "${NS}" == "default" ] || kubectl get secret -n "${NS}" "${K8S_SECRET}" &>/dev/null || continue
+			[ "${NS}" == "default" ] || kubectl --context "local" get secret -n "${NS}" "${K8S_SECRET}" &>/dev/null || continue
 			say "\tCreating on namespace ${NS}..."
-			kubectl delete secret \
+			kubectl --context "local" delete secret \
 				--namespace "${NS}" \
 				"${K8S_SECRET}" &>/dev/null || true
-			kubectl create secret \
+			kubectl --context "local" create secret \
 				generic \
 				--namespace "${NS}" \
 				"${K8S_SECRET}" \
 				--from-file=.dockerconfigjson="${DOCKER_CONFIG}" \
 				--type=kubernetes.io/dockerconfigjson || fail "ERROR: Failed to create the secret ${K8S_SECRET} in namespace ${NS} (${?})"
-		done < <(kubectl get namespace | awk '{ print $1 }' | tail -n +2 | sort)
+		done < <(kubectl --context "local" get namespace | awk '{ print $1 }' | tail -n +2 | sort)
 	fi
 fi
 say "Login complete"

@@ -40,10 +40,10 @@ RESOLVED_RUNNING="false"
 systemctl status "${RESOLVED}" &>/dev/null && RESOLVED_RUNNING="true"
 
 # Get the IP for the DNS service...
-DNS_IP="$(kubectl get service -n kube-system kube-dns -o json | jq -r ".spec.clusterIP")" || fail "Failed to get the IP address for the kube-dns service"
+DNS_IP="$(kubectl --context "local" get service -n kube-system kube-dns -o json | jq -r ".spec.clusterIP")" || fail "Failed to get the IP address for the kube-dns service"
 
 # Get the cluster domain (separated by spaces)
-CLUSTER_DOMAIN="$(kubectl get pod -n kube-system "$(kubectl get pod -n kube-system | grep "^kube-apiserver-" | awk '{ print $1 }')" -o json | jq -r '.spec.containers[].command[] | select(startswith("--service-account-issuer")) | sub("^.*=https://kubernetes[.]default[.]"; "default.")')"
+CLUSTER_DOMAIN="$(kubectl --context "local" get pod -n kube-system "$(kubectl --context "local" get pod -n kube-system | grep "^kube-apiserver-" | awk '{ print $1 }')" -o json | jq -r '.spec.containers[].command[] | select(startswith("--service-account-issuer")) | sub("^.*=https://kubernetes[.]default[.]"; "default.")')"
 
 # Make sure the target directory exists
 TARGET_DIR="${SYSTEMD_DIR}/resolved.conf.d"
@@ -87,15 +87,15 @@ if LOCAL_ONLY_IFACE="$(nmcli -g connection.interface-name connection show "${LOC
 	say "✅ Configuring the cluster DNS to forward to resolved on [${LOCAL_ONLY_ADDX}]"
 
 	# Update the configuration
-	CONFIGMAP="$(kubectl -n kube-system get configmap coredns -o json)"
+	CONFIGMAP="$(kubectl --context "local" -n kube-system get configmap coredns -o json)"
 	COREFILE="$(jq -r ".data.Corefile" <<< "${CONFIGMAP}" | sed -e "s;/etc/resolv.conf;${LOCAL_ONLY_ADDX};g")"
 	CONFIGMAP="$(jq -r --arg corefile "${COREFILE}" '.data.Corefile = $corefile' <<< "${CONFIGMAP}")"
 
 	# Save the changes
-	kubectl -n kube-system apply -f - <<< "${CONFIGMAP}"
+	kubectl --context "local" -n kube-system apply -f - <<< "${CONFIGMAP}"
 
 	# Bounce the CoreDNS Pods!
-	kubectl -n kube-system rollout restart deployment coredns
+	kubectl --context "local" -n kube-system rollout restart deployment coredns
 fi
 
 # Restart the DNS resolver, if necessary

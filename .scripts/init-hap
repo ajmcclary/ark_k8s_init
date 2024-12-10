@@ -36,9 +36,9 @@ case "${DEFAULT,,}" in
 	* ) DEFAULT="false" ;;
 esac
 
-echo_run kubectl delete -n "${HAP_APP_NS}" IngressClass "${INGRESS_CLASS_NAME}" || true
-echo_run kubectl delete -n "${HAP_APP_NS}" configmap "${HAP_APP_NAME}" || true
-echo_run kubectl create -f - <<EOF
+echo_run kubectl --context "local" delete -n "${HAP_APP_NS}" IngressClass "${INGRESS_CLASS_NAME}" || true
+echo_run kubectl --context "local" delete -n "${HAP_APP_NS}" configmap "${HAP_APP_NAME}" || true
+echo_run kubectl --context "local" create -f - <<EOF
 ---
 apiVersion: networking.k8s.io/v1
 kind: IngressClass
@@ -54,6 +54,7 @@ spec:
 EOF
 
 echo_run helm upgrade --install \
+	--kube-context "local" \
 	"${HAP_APP_NAME}" \
 	haproxy-ingress/haproxy-ingress \
 	--create-namespace --namespace "${HAP_APP_NS}" \

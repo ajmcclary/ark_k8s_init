@@ -7,20 +7,24 @@
 
 set -euo pipefail
 
-timestamp() {
+timestamp()
+{
 	date -Ins -u
 }
 
-say() {
+say()
+{
 	echo -e "$(timestamp): ${@}"
 }
 
-fail() {
+fail()
+{
 	say "${@}" 1>&2
 	exit ${EXIT_CODE:-1}
 }
 
-usage() {
+usage()
+{
 	echo -e "usage: ${BASH_SOURCE:-${0}} pod [container]" 1>&2
 	exit 1
 }

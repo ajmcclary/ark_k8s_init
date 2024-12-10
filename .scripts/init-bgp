@@ -53,4 +53,4 @@ spec:
   asNumber: 65000
 EOF
 	done
-) | tee >(echo_run kubectl apply -f -)
+) | tee >(echo_run kubectl --context "local" apply -f -)

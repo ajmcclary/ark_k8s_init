@@ -103,7 +103,7 @@ if [ "$(/usr/bin/id -u)" != "0" ] ; then
 	fi
 	echo ""
 
-	if kubectl get pods -A &>/dev/null ; then
+	if kubectl --context "local" get pods -A &>/dev/null ; then
 		ok "Kubernetes control is enabled"
 	else
 		err "Your Kubernetes configuration seems to be incorrect, please fix it before continuing. Feel free to ask for help if you feel it's necessary."
@@ -266,7 +266,7 @@ ok "Kubernetes is installed"
 #
 # Initialize the K8s node
 #
-if ! kubectl get pods -A &>/dev/null ; then
+if ! kubectl --context "local" get pods -A &>/dev/null ; then
 	(
 		doing "Initializing the Kubernetes cluster node..."
 		set -euo pipefail

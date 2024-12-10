@@ -27,7 +27,7 @@ get_pod_ready_status()
 	local PODS=""
 	local COUNT="0"
 	while true ; do
-		PODS="$(kubectl get pods -A -o json 2>/dev/null)" || true
+		PODS="$(kubectl --context "local" get pods -A -o json 2>/dev/null)" || true
 		[ -n "${PODS}" ] || PODS="{ }"
 
 		# Count the number of pods ... if it's 0, we need to wait and
@@ -72,8 +72,9 @@ RC=0
 [ ${BOOT_TIMEOUT} -ge ${MIN_BOOT_TIMEOUT} ] || BOOT_TIMEOUT=${MIN_BOOT_TIMEOUT}
 
 say "Installation complete! Waiting for the pods to finish booting (up to ${BOOT_TIMEOUT} secs)..."
-kubectl get pods -A
+kubectl --context "local" get pods -A
 
+# TODO: Switch to kubectl wait ... ?
 START="$(date +%s)"
 while true ; do
 	UNREADY="$(get_unready_pods | grep -v '^kube-system metrics-server-' | wc -l)" || true
@@ -92,4 +93,4 @@ while true ; do
 done
 
 say ""
-exec kubectl get pods -A
+exec kubectl --context "local" get pods -A

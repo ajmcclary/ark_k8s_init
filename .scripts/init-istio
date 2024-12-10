@@ -13,11 +13,11 @@ echo_run()
 }
 
 # Install Istio
-echo_run istioctl install --set profile=default -y
-echo_run istioctl install --set profile=default --set meshConfig.defaultConfig.holdApplicationUntilProxyStarts=true -y
+echo_run istioctl --context "local" install --set profile=default -y
+echo_run istioctl --context "local" install --set profile=default --set meshConfig.defaultConfig.holdApplicationUntilProxyStarts=true -y
 
 # Enable Istio by default
-echo_run kubectl label namespace default istio-injection=enabled
+echo_run kubectl --context "local" label namespace default istio-injection=enabled
 
 # This needs to be run on every master node to enable automatic Istio injection
 sed -i \
