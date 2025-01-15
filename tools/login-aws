@@ -6,6 +6,7 @@ set -euo pipefail
 [ -v AWS_PROFILE ] || AWS_PROFILE="armedia-marketplace"
 [ -v K8S_SECRET ] || K8S_SECRET="aws-arkcase-pull"
 [ -v AWS_USERNAME ] || AWS_USERNAME="AWS"
+[ -v LOCAL_CONTEXT ] || LOCAL_CONTEXT="local"
 
 say()
 {
@@ -147,23 +148,26 @@ docker login --username "${AWS_USERNAME}" --password-stdin "${HOST}" <<< "${PASS
 RC=${?}
 [ ${RC} -eq 0 ] || exit ${RC}
 
-if kubectl --context "local" get node &>/dev/null ; then
+CTX=()
+[ -n "${LOCAL_CONTEXT}" ] && CTX=(--context "${LOCAL_CONTEXT}")
+
+if kubectl "${CTX[@]}" get node &>/dev/null ; then
 	DOCKER_CONFIG="$(readlink -f ~/.docker/config.json 2>/dev/null)"
 	if [ -n "${DOCKER_CONFIG}" ] && [ -f "${DOCKER_CONFIG}" ] ; then
 		say "Creating Kubernetes secret (${K8S_SECRET}) for [${DOCKER_CONFIG}]..."
 		while read NS ; do
-			[ "${NS}" == "default" ] || kubectl --context "local" get secret -n "${NS}" "${K8S_SECRET}" &>/dev/null || continue
+			[ "${NS}" == "default" ] || kubectl "${CTX[@]}" get secret -n "${NS}" "${K8S_SECRET}" &>/dev/null || continue
 			say "\tCreating on namespace ${NS}..."
-			kubectl --context "local" delete secret \
+			kubectl "${CTX[@]}" delete secret \
 				--namespace "${NS}" \
 				"${K8S_SECRET}" &>/dev/null || true
-			kubectl --context "local" create secret \
+			kubectl "${CTX[@]}" create secret \
 				generic \
 				--namespace "${NS}" \
 				"${K8S_SECRET}" \
 				--from-file=.dockerconfigjson="${DOCKER_CONFIG}" \
 				--type=kubernetes.io/dockerconfigjson || fail "ERROR: Failed to create the secret ${K8S_SECRET} in namespace ${NS} (${?})"
-		done < <(kubectl --context "local" get namespace | awk '{ print $1 }' | tail -n +2 | sort)
+		done < <(kubectl "${CTX[@]}" get namespace | awk '{ print $1 }' | tail -n +2 | sort)
 	fi
 fi
 say "Login complete"
