@@ -55,6 +55,16 @@ LOCAL_ONLY_ENDPOINT="k8s.cluster.prv"
 LOCAL_ONLY_IFACE="kubelocal0"
 LOCAL_ONLY_ADDX="10.255.255.254"
 
+LAN_FQDN="$(hostname -f)"
+LAN_HOSTNAME="$(hostname -s)"
+LAN_IFACE="$(nmcli -g device,type conn show --active 2>/dev/null | grep -- 'ethernet$' | sed -e 's;:.*$;;g' | head -1)" || true
+if [ -n "${LAN_IFACE}" ] ; then
+	LAN_ADDRESS="$(dig +short +search "${LAN_FQDN}")"
+else
+	LAN_IFACE="${LOCAL_ONLY_IFACE}"
+	LAN_ADDRESS="${LOCAL_ONLY_ADDX}"
+fi
+
 # From what we've seen, this is harmless if used all the time. However,
 # the exposure of this variable means that we can easily enough initialize
 # control plane nodes designed to use a shared endpoint IP (remember to
@@ -167,6 +177,9 @@ if [ "${CONTROL_PLANE_ENDPOINT}" == "${LOCAL_ONLY_ENDPOINT}" ] ; then
 		    - localhost
 		    - localhost.localdomain
 		    - ${LOCAL_ONLY_ENDPOINT}
+		    - ${LAN_HOSTNAME}
+		    - ${LAN_FQDN}
+		    - ${LAN_ADDRESS}
 		etcd:
 		  local:
 		    serverCertSANs:
@@ -174,11 +187,17 @@ if [ "${CONTROL_PLANE_ENDPOINT}" == "${LOCAL_ONLY_ENDPOINT}" ] ; then
 		      - localhost
 		      - localhost.localdomain
 		      - ${LOCAL_ONLY_ENDPOINT}
+		      - ${LAN_HOSTNAME}
+		      - ${LAN_FQDN}
+		      - ${LAN_ADDRESS}
 		    peerCertSANs:
 		      - 127.0.0.1
 		      - localhost
 		      - localhost.localdomain
 		      - ${LOCAL_ONLY_ENDPOINT}
+		      - ${LAN_HOSTNAME}
+		      - ${LAN_FQDN}
+		      - ${LAN_ADDRESS}
 		    extraArgs:
 		      listen-client-urls: https://${LOCAL_ONLY_ADDX}:2379
 		      advertise-client-urls: https://${LOCAL_ONLY_ADDX}:2379
