@@ -57,13 +57,21 @@ LOCAL_ONLY_ADDX="10.255.255.254"
 
 LAN_FQDN="$(hostname -f)"
 LAN_HOSTNAME="$(hostname -s)"
-LAN_IFACE="$(nmcli -g device,type conn show --active 2>/dev/null | grep -- 'ethernet$' | sed -e 's;:.*$;;g' | head -1)" || true
-if [ -n "${LAN_IFACE}" ] ; then
-	LAN_ADDRESS="$(dig +short +search "${LAN_FQDN}")"
-else
-	LAN_IFACE="${LOCAL_ONLY_IFACE}"
-	LAN_ADDRESS="${LOCAL_ONLY_ADDX}"
-fi
+
+LAN_ADDRESSES=""
+while read DEV ; do
+	ADDRESSES="$(nmcli -g 'ip4.address' dev show "${DEV}" | sed -e 's;\s*|\s*;", ";g' -e 's;/..;;g' -e 's;^\s*;;g' -e 's;\s*$;;g')"
+	[ -n "${ADDRESSES}" ] || continue
+
+	# Add a separator between address batches, if necessary
+	[ -n "${LAN_ADDRESSES}" ] && LAN_ADDRESSES+='", "'
+
+	LAN_ADDRESSES+="${ADDRESSES}"
+done < <(nmcli -g device,type conn show --active 2>/dev/null | grep -- 'ethernet$' | sed -e 's;:.*$;;g')
+
+# We expressly don't add a leading or trailing double-quote
+# because that's added expressly down below. We do this for
+# syntactic consistency there.
 
 # From what we've seen, this is harmless if used all the time. However,
 # the exposure of this variable means that we can easily enough initialize
@@ -172,32 +180,11 @@ KUBEADM_CONFIG+=$'\n'
 if [ "${CONTROL_PLANE_ENDPOINT}" == "${LOCAL_ONLY_ENDPOINT}" ] ; then
 	read -r -d '' VAR <<-EOF || true
 		apiServer:
-		  certSANs:
-		    - 127.0.0.1
-		    - localhost
-		    - localhost.localdomain
-		    - ${LOCAL_ONLY_ENDPOINT}
-		    - ${LAN_HOSTNAME}
-		    - ${LAN_FQDN}
-		    - ${LAN_ADDRESS}
+		  certSANs: &cert-sans [ "127.0.0.1", "localhost", "localhost.localdomain", "${LOCAL_ONLY_ENDPOINT}", "${LAN_HOSTNAME}", "${LAN_FQDN}", "${LAN_ADDRESSES}" ]
 		etcd:
 		  local:
-		    serverCertSANs:
-		      - 127.0.0.1
-		      - localhost
-		      - localhost.localdomain
-		      - ${LOCAL_ONLY_ENDPOINT}
-		      - ${LAN_HOSTNAME}
-		      - ${LAN_FQDN}
-		      - ${LAN_ADDRESS}
-		    peerCertSANs:
-		      - 127.0.0.1
-		      - localhost
-		      - localhost.localdomain
-		      - ${LOCAL_ONLY_ENDPOINT}
-		      - ${LAN_HOSTNAME}
-		      - ${LAN_FQDN}
-		      - ${LAN_ADDRESS}
+		    serverCertSANs: *cert-sans
+		    peerCertSANs: *cert-sans
 		    extraArgs:
 		      listen-client-urls: https://${LOCAL_ONLY_ADDX}:2379
 		      advertise-client-urls: https://${LOCAL_ONLY_ADDX}:2379
