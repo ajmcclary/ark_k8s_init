@@ -10,7 +10,7 @@ set -euo pipefail
 
 say()
 {
-	echo -e "${@}"
+	echo -e "$(date -Ins): ${@}"
 }
 
 fail()
@@ -21,7 +21,8 @@ fail()
 
 usage()
 {
-	fail "usage: ${BASH_ARGV0:-${BASH_SOURCE:-${0}}} (- | stdin | sso | local | help) [profile:...] [secret:...] [region:...]"
+	echo -e "usage: ${BASH_ARGV0:-${BASH_SOURCE:-${0}}} (- | stdin | sso | local | help) [profile:...] [secret:...] [region:...]"
+	exit 1
 }
 
 update_from_stdin()
@@ -149,7 +150,12 @@ RC=${?}
 [ ${RC} -eq 0 ] || exit ${RC}
 
 CTX=()
-[ -n "${LOCAL_CONTEXT}" ] && CTX=(--context "${LOCAL_CONTEXT}")
+if [ -n "${LOCAL_CONTEXT}" ] ; then
+	CTX=(--context "${LOCAL_CONTEXT}")
+else
+	LOCAL_CONTEXT="$(kubectl config current-context)"
+fi
+say "Using the context ${LOCAL_CONTEXT}"
 
 if kubectl "${CTX[@]}" get node &>/dev/null ; then
 	DOCKER_CONFIG="$(readlink -f ~/.docker/config.json 2>/dev/null)"
