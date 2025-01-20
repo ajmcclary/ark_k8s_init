@@ -211,7 +211,7 @@ echo_run sysctl -p "${K8S_SYSCTL}" || fail "Failed to enable network bridging"
 # Next, init the cluster
 echo_run kubeadm init \
 	--config "${KUBEADM_CONFIG_FILE}" \
-	--upload-certs || fail "Failed to run the kubeadm init command"
+	--upload-certs || fail "Kubeadm failed using this configuration:\n$(<"${KUBEADM_CONFIG_FILE}")"
 
 CA_UPDATER=()
 CA_UPDATER+=(update-ca-trust:/etc/pki/ca-trust/source/anchors)
