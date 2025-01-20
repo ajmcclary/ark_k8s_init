@@ -58,17 +58,6 @@ LOCAL_ONLY_ADDX="10.255.255.254"
 LAN_FQDN="$(hostname -f)"
 LAN_HOSTNAME="$(hostname -s)"
 
-LAN_ADDRESSES=""
-while read DEV ; do
-	ADDRESSES="$(nmcli -g 'ip4.address' dev show "${DEV}" | sed -e 's;\s*|\s*;", ";g' -e 's;/..;;g' -e 's;^\s*;;g' -e 's;\s*$;;g')"
-	[ -n "${ADDRESSES}" ] || continue
-
-	# Add a separator between address batches, if necessary
-	[ -n "${LAN_ADDRESSES}" ] && LAN_ADDRESSES+='", "'
-
-	LAN_ADDRESSES+="${ADDRESSES}"
-done < <(nmcli -g device,type conn show --active 2>/dev/null | grep -- 'ethernet$' | sed -e 's;:.*$;;g')
-
 # We expressly don't add a leading or trailing double-quote
 # because that's added expressly down below. We do this for
 # syntactic consistency there.
@@ -180,7 +169,7 @@ KUBEADM_CONFIG+=$'\n'
 if [ "${CONTROL_PLANE_ENDPOINT}" == "${LOCAL_ONLY_ENDPOINT}" ] ; then
 	read -r -d '' VAR <<-EOF || true
 		apiServer:
-		  certSANs: &cert-sans [ "127.0.0.1", "localhost", "localhost.localdomain", "${LOCAL_ONLY_ENDPOINT}", "${LAN_HOSTNAME,,}", "${LAN_FQDN,,}", "${LAN_ADDRESSES}" ]
+		  certSANs: &cert-sans [ "127.0.0.1", "localhost", "localhost.localdomain", "${LOCAL_ONLY_ENDPOINT}", "${LAN_HOSTNAME,,}", "${LAN_FQDN,,}" ]
 		etcd:
 		  local:
 		    serverCertSANs: *cert-sans
