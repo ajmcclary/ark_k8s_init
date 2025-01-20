@@ -180,7 +180,7 @@ KUBEADM_CONFIG+=$'\n'
 if [ "${CONTROL_PLANE_ENDPOINT}" == "${LOCAL_ONLY_ENDPOINT}" ] ; then
 	read -r -d '' VAR <<-EOF || true
 		apiServer:
-		  certSANs: &cert-sans [ "127.0.0.1", "localhost", "localhost.localdomain", "${LOCAL_ONLY_ENDPOINT}", "${LAN_HOSTNAME}", "${LAN_FQDN}", "${LAN_ADDRESSES}" ]
+		  certSANs: &cert-sans [ "127.0.0.1", "localhost", "localhost.localdomain", "${LOCAL_ONLY_ENDPOINT}", "${LAN_HOSTNAME,,}", "${LAN_FQDN,,}", "${LAN_ADDRESSES}" ]
 		etcd:
 		  local:
 		    serverCertSANs: *cert-sans
