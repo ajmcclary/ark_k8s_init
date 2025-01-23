@@ -219,7 +219,7 @@ ok "Docker is installed and running"
 if ! systemctl is-active --quiet cri-docker.service  ; then
 	if ! is_installed cri-dockerd ; then
 		[ -v CRI_VER ] || CRI_VER=""
-		[ -n "${CRI_VER}" ] || CRI_VER="0.3.4"
+		[ -n "${CRI_VER}" ] || CRI_VER="0.3.16"
 		[ -v CRI_DISTRO ] || CRI_DISTRO=""
 		[ -n "${CRI_DISTRO}" ] || CRI_DISTRO="jammy"
 		doing "Installing CRI-Docker v${CRI_VER} (${CRI_DISTRO})..."
@@ -241,7 +241,7 @@ ok "CRI-Docker is installed and running"
 #
 if ! helm version &>/dev/null ; then
 	[ -v HELM_VER ] || HELM_VER=""
-	[ -n "${HELM_VER}" ] || HELM_VER="3.12.3"
+	[ -n "${HELM_VER}" ] || HELM_VER="3.15.2"
 	doing "Installing Helm v${HELM_VER}..."
 	curl -fsSL https://get.helm.sh/helm-v${HELM_VER}-linux-amd64.tar.gz | tar -C /usr/local/bin --strip-components=1 -xzvf - linux-amd64/helm
 	helm version &>/dev/null
