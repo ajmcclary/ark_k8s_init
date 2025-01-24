@@ -6,7 +6,7 @@ set -euo pipefail
 [ -v AWS_PROFILE ] || AWS_PROFILE="armedia-marketplace"
 [ -v K8S_SECRET ] || K8S_SECRET="aws-arkcase-pull"
 [ -v AWS_USERNAME ] || AWS_USERNAME="AWS"
-[ -v LOCAL_CONTEXT ] || LOCAL_CONTEXT="local"
+[ -v CONTEXT ] || CONTEXT="local"
 
 say()
 {
@@ -149,13 +149,11 @@ docker login --username "${AWS_USERNAME}" --password-stdin "${HOST}" <<< "${PASS
 RC=${?}
 [ ${RC} -eq 0 ] || exit ${RC}
 
-CTX=()
-if [ -n "${LOCAL_CONTEXT}" ] ; then
-	CTX=(--context "${LOCAL_CONTEXT}")
-else
-	LOCAL_CONTEXT="$(kubectl config current-context)"
-fi
-say "Using the context ${LOCAL_CONTEXT}"
+[ -z "${CONTEXT}" ] || CONTEXT="$(kubectl config current-context)"
+CTX=(--context "${CONTEXT}")
+
+say "Using the context [${CONTEXT}]..."
+ERR="$(kubectl config get-contexts "${CONTEXT}" 2>&1)" || fail "The context [${CONTEXT}] is invalid (rc=${?}):\n${ERR}"
 
 if kubectl "${CTX[@]}" get node &>/dev/null ; then
 	DOCKER_CONFIG="$(readlink -f ~/.docker/config.json 2>/dev/null)"
