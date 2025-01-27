@@ -149,7 +149,7 @@ docker login --username "${AWS_USERNAME}" --password-stdin "${HOST}" <<< "${PASS
 RC=${?}
 [ ${RC} -eq 0 ] || exit ${RC}
 
-[ -z "${CONTEXT}" ] || CONTEXT="$(kubectl config current-context)"
+[ -n "${CONTEXT}" ] || CONTEXT="$(kubectl config current-context)"
 CTX=(--context "${CONTEXT}")
 
 say "Using the context [${CONTEXT}]..."
