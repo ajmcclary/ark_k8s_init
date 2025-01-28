@@ -32,6 +32,8 @@ __cmd_unjam()
 {
 	say "Restarting the Calico Node pods..."
 	kubectl --context "local" delete pod -n calico-system -l k8s-app=calico-node
+	say "Restarting the Calico Typha pods..."
+	kubectl --context "local" delete pod -n calico-system -l k8s-app=calico-typha
 }
 
 __cmd_restart()
