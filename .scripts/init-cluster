@@ -37,7 +37,7 @@ else
 	ok "Privilege check complete!"
 fi
 
-DEF_BOOT_TIMEOUT=90
+DEF_BOOT_TIMEOUT=300
 MIN_BOOT_TIMEOUT=15
 
 [ -v BASE_DIR ] || BASE_DIR=""
