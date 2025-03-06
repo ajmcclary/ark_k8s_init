@@ -249,19 +249,29 @@ fi
 ok "Helm is installed"
 
 #
-# Install Kubernetes
+# Install/Upgrade Kubernetes
 #
-if ! kubeadm version &>/dev/null ; then
-	[ -v K8S_VER ] || K8S_VER=""
-	[ -n "${K8S_VER}" ] || K8S_VER="1.30"
-	doing "Installing Kubernetes v${K8S_VER}..."
+[ -v K8S_VER ] || K8S_VER=""
+[ -n "${K8S_VER}" ] || K8S_VER="1.31"
+
+if KUBEADM_VER="$(kubeadm version -o json)" ; then
+	KUBEADM_VER="$(jq -r '.clientVersion.major + "." + .clientVersion.minor' <<< "${KUBEADM_VER}")"
+else
+	KUBEADM_VER="0"
+fi
+
+INSTALLED="false"
+if [ ${KUBEADM_VER//./0} -lt ${K8S_VER//./0} ] ; then
+	[ -n "${KUBEADM_VER}" ] && say "Existing Kubernetes version ${KUBEADM_VER}"
+	doing "Installing/Upgrading Kubernetes v${K8S_VER}..."
 	rm -f "${TRUSTED_GPG_DIR}/kubernetes.gpg" &>/dev/null || true
 	curl -fsSL "https://pkgs.k8s.io/core:/stable:/v${K8S_VER}/deb/Release.key" | gpg --dearmor -o "${TRUSTED_GPG_DIR}/kubernetes.gpg"
 	echo "deb https://pkgs.k8s.io/core:/stable:/v${K8S_VER}/deb/ /" > "${APT_SOURCES_DIR}/kubernetes.list"
 	apt-get update
 	apt-get install -y kubelet kubeadm kubectl
+	INSTALLED="true"
 fi
-ok "Kubernetes is installed"
+ok "Kubernetes v${K8S_VER} is installed"
 
 #
 # Initialize the K8s node
@@ -276,8 +286,15 @@ if ! kubectl --context "local" get pods -A &>/dev/null ; then
 		[ -v SERVICE_CIDR ] && echo "	👉 SERVICE_CIDR=[${SERVICE_CIDR}]"
 		"${SCRIPT_DIR}/init-cluster"
 	)
+	ok "The Kubernetes node is initialized"
+elif "${INSTALLED}" ; then
+	KUBEADM_VER="$(kubeadm version -o json | jq -r '.clientVersion.gitVersion')"
+	doing "Uprading the Kubernetes cluster node to ${KUBEADM_VER}..."
+	kubeadm upgrade apply "${KUBEADM_VER}"
+	doing "Restarting the kubelet..."
+	systemctl restart kubelet
+	ok "The Kubernetes node is upgraded"
 fi
-ok "The Kubernetes node is initialized"
 
 #
 # Configure the local DNS stuff
