@@ -126,6 +126,7 @@ case "${ACTION,,}" in
 		;;
 
 	* )
+		say "Unknown action [${ACTION}]"
 		usage
 		;;
 esac
