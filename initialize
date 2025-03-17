@@ -254,13 +254,26 @@ ok "Helm is installed"
 [ -v K8S_VER ] || K8S_VER=""
 [ -n "${K8S_VER}" ] || K8S_VER="1.31"
 
+K8S_UPGRADE_VER=""
 if KUBEADM_VER="$(kubeadm version -o json)" ; then
 	KUBEADM_VER="$(jq -r '.clientVersion.major + "." + .clientVersion.minor' <<< "${KUBEADM_VER}")"
+
+	# Try to see if there's an upgrade plan available
+	#
+	# Wait for this to take effect, though...
+	doing "Rebooting Calico (just in case)..."
+    kubectl --context "local" --namespace "calico-system" delete pod --selector k8s-app=calico-node &>/dev/null || true
+    kubectl --context "local" --namespace "calico-system" delete pod --selector k8s-app=calico-typha &>/dev/null || true
+	doing "Waiting for Calico to reboot..."
+	kubectl --context "local" --namespace "calico-system" wait --timeout=30s --for condition=Ready pod --selector k8s-app=calico-node &>/dev/null
+	kubectl --context "local" --namespace "calico-system" wait --timeout=30s --for condition=Ready pod --selector k8s-app=calico-typha &>/dev/null
+
+	doing "Fetching any potential upgrade information..."
+	K8S_UPGRADE_VER="$(kubeadm upgrade plan -o json 2>/dev/null | jq -r '.availableUpgrades[].components[] | select(.name == "kube-apiserver") | select(.currentVersion != .newVersion) | .newVersion')"
 else
 	KUBEADM_VER="0"
 fi
 
-INSTALLED="false"
 if [ ${KUBEADM_VER//./0} -lt ${K8S_VER//./0} ] ; then
 	[ -n "${KUBEADM_VER}" ] && say "Existing Kubernetes version ${KUBEADM_VER}"
 	doing "Installing/Upgrading Kubernetes v${K8S_VER}..."
@@ -269,7 +282,6 @@ if [ ${KUBEADM_VER//./0} -lt ${K8S_VER//./0} ] ; then
 	echo "deb https://pkgs.k8s.io/core:/stable:/v${K8S_VER}/deb/ /" > "${APT_SOURCES_DIR}/kubernetes.list"
 	apt-get update
 	apt-get install -y kubelet kubeadm kubectl
-	INSTALLED="true"
 fi
 ok "Kubernetes v${K8S_VER} is installed"
 
@@ -287,13 +299,12 @@ if ! kubectl --context "local" get pods -A &>/dev/null ; then
 		"${SCRIPT_DIR}/init-cluster"
 	)
 	ok "The Kubernetes node is initialized"
-elif "${INSTALLED}" ; then
-	KUBEADM_VER="$(kubeadm version -o json | jq -r '.clientVersion.gitVersion')"
-	doing "Uprading the Kubernetes cluster node to ${KUBEADM_VER}..."
-	kubeadm upgrade apply "${KUBEADM_VER}"
+elif [ -n "${K8S_UPGRADE_VER}" ] ; then
+	doing "Uprading the Kubernetes cluster node to ${K8S_UPGRADE_VER}..."
+	kubeadm upgrade apply "${K8S_UPGRADE_VER}"
 	doing "Restarting the kubelet..."
 	systemctl restart kubelet
-	ok "The Kubernetes node is upgraded"
+	ok "The Kubernetes node is upgraded to ${K8S_UPGRADE_VER}"
 fi
 
 #
