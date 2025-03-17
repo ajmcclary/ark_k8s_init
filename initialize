@@ -301,7 +301,7 @@ if ! kubectl --context "local" get pods -A &>/dev/null ; then
 	ok "The Kubernetes node is initialized"
 elif [ -n "${K8S_UPGRADE_VER}" ] ; then
 	doing "Uprading the Kubernetes cluster node to ${K8S_UPGRADE_VER}..."
-	kubeadm upgrade apply "${K8S_UPGRADE_VER}"
+	kubeadm upgrade apply --yes "${K8S_UPGRADE_VER}"
 	doing "Restarting the kubelet..."
 	systemctl restart kubelet
 	ok "The Kubernetes node is upgraded to ${K8S_UPGRADE_VER}"
