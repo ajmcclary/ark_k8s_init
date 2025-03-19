@@ -261,15 +261,23 @@ if KUBEADM_VER="$(kubeadm version -o json)" ; then
 	# Try to see if there's an upgrade plan available
 	#
 	# Wait for this to take effect, though...
-	doing "Rebooting Calico (just in case)..."
-    kubectl --context "local" --namespace "calico-system" delete pod --selector k8s-app=calico-node &>/dev/null || true
-    kubectl --context "local" --namespace "calico-system" delete pod --selector k8s-app=calico-typha &>/dev/null || true
-	doing "Waiting for Calico to reboot..."
-	kubectl --context "local" --namespace "calico-system" wait --timeout=30s --for condition=Ready pod --selector k8s-app=calico-typha &>/dev/null || err "Calico typhe reboot timed out"
-	kubectl --context "local" --namespace "calico-system" wait --timeout=30s --for condition=Ready pod --selector k8s-app=calico-node &>/dev/null || err "Calico node reboot timed out"
+	if kubectl --context "local" --namespace "calico-system" get pods &>/dev/null ; then
+		doing "Rebooting Calico (just in case)..."
+		kubectl --context "local" --namespace "calico-system" delete pod --selector k8s-app=calico-node &>/dev/null || true
+		kubectl --context "local" --namespace "calico-system" delete pod --selector k8s-app=calico-typha &>/dev/null || true
+		doing "Waiting for Calico to reboot..."
+		kubectl --context "local" --namespace "calico-system" wait --timeout=30s --for condition=Ready pod --selector k8s-app=calico-typha &>/dev/null || err "Calico typha reboot timed out"
+		kubectl --context "local" --namespace "calico-system" wait --timeout=30s --for condition=Ready pod --selector k8s-app=calico-node &>/dev/null || err "Calico node reboot timed out"
+	fi
 
-	doing "Fetching any potential upgrade information..."
-	K8S_UPGRADE_VER="$(kubeadm upgrade plan -o json 2>/dev/null | jq -r '.availableUpgrades[].components[] | select(.name == "kube-apiserver") | select(.currentVersion != .newVersion) | .newVersion')"
+	if kubectl --context "local" get nodes &>/dev/null ; then
+		doing "Fetching any potential upgrade information..."
+		if K8S_UPGRADE_PLAN="$(kubeadm upgrade plan -o json 2>/dev/null)" ; then
+			K8S_UPGRADE_VER="$(jq -r '.availableUpgrades[].components[] | select(.name == "kube-apiserver") | select(.currentVersion != .newVersion) | .newVersion' <<< "${K8S_UPGRADE_PLAN}")"
+		else
+			err "Could not compute an upgrade plan ... maybe it's not needed?"
+		fi
+	fi
 else
 	KUBEADM_VER="0"
 fi
