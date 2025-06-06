@@ -202,20 +202,6 @@ echo_run kubeadm init \
 	--config "${KUBEADM_CONFIG_FILE}" \
 	--upload-certs || fail "Kubeadm failed using this configuration:\n$(<"${KUBEADM_CONFIG_FILE}")"
 
-CA_UPDATER=()
-CA_UPDATER+=(update-ca-trust:/etc/pki/ca-trust/source/anchors)
-CA_UPDATER+=(update-ca-certificates:/usr/local/share/ca-certificates/)
-for updater in "${CA_UPDATER[@]}" ; do
-	IFS=":" read ca target <<< "${updater}"
-	if type -P "${ca}" &>/dev/null ; then
-		echo_run cp -vf /etc/kubernetes/pki/ca.crt "${target}"/k8s-ca.crt
-		RC=0
-		echo_run "${ca}" || RC=${?}
-		[ ${RC} -eq 0 ] || echo "WARNING: ${ca} returned ${RC} ... certificate trusts may be incomplete!"
-		break
-	fi
-done
-
 # Set up the kubeconfig stuff
 "${BASEDIR}/init-kubeconfig"
 

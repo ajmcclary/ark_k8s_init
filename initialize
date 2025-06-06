@@ -316,6 +316,14 @@ elif [ -n "${K8S_UPGRADE_VER}" ] ; then
 fi
 
 #
+# Enable certificate trusts
+#
+(
+	doing "Enabling trust on the Kubernetes CA certificate"
+	"${SCRIPT_DIR}/init-ca-trust"
+)
+
+#
 # Configure the local DNS stuff
 #
 (

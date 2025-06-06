@@ -1,0 +1,45 @@
+#!/bin/bash
+SCRIPT="$(readlink -f "${0}")"
+BASEDIR="$(dirname "${SCRIPT}")"
+SCRIPT="$(basename "${SCRIPT}")"
+
+set -euo pipefail
+
+[ "$(/usr/bin/id -u)" == "0" ] || exec sudo -EH "${0}" "${@}"
+
+timestamp()
+{
+	/usr/bin/date -Ins -u
+}
+
+say()
+{
+	echo -e "$(timestamp): ${@}"
+}
+
+fail()
+{
+	say "❌ ${@}" 1>&2
+	exit ${EXIT_CODE:-1}
+}
+
+echo_run()
+{
+	local ARGS=("${@}")
+	echo "${ARGS[@]@Q}"
+	"${@}"
+}
+
+CA_UPDATER=()
+CA_UPDATER+=(update-ca-trust:/etc/pki/ca-trust/source/anchors)
+CA_UPDATER+=(update-ca-certificates:/usr/local/share/ca-certificates/)
+for updater in "${CA_UPDATER[@]}" ; do
+	IFS=":" read ca target <<< "${updater}"
+	if type -P "${ca}" &>/dev/null ; then
+		echo_run cp -vf /etc/kubernetes/pki/ca.crt "${target}"/k8s-ca.crt
+		RC=0
+		echo_run "${ca}" || RC=${?}
+		[ ${RC} -eq 0 ] || echo "WARNING: ${ca} returned ${RC} ... certificate trusts may be incomplete!"
+		break
+	fi
+done
