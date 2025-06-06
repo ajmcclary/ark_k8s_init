@@ -43,3 +43,28 @@ for updater in "${CA_UPDATER[@]}" ; do
 		break
 	fi
 done
+
+# Create a secret that contains the K8s CA
+NS="kube-system"
+NAME="kube-ca"
+SECRET="
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  namespace: ${NS}
+  name: ${NAME}
+type: Opaque
+stringData:
+  crt: |-
+$(cat /etc/kubernetes/pki/ca.crt | sed -e 's;^;    ;g')
+  key: |-
+$(cat /etc/kubernetes/pki/ca.key | sed -e 's;^;    ;g')
+"
+
+LABEL="Creating"
+COMMAND="create"
+kubectl --namespace "${NS}" get secret "${NAME}" &>/dev/null && COMMAND="apply" && LABEL="Updating"
+
+say "${LABEL} the secret ${NS}::${NAME} with the Kubernetes CAs"
+kubectl --namespace "${NS}" "${COMMAND}" -f - <<< "${SECRET}"
