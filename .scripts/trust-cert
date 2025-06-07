@@ -1,0 +1,104 @@
+#!/bin/bash
+SCRIPT="$(readlink -f "${BASH_SOURCE:-${0}}")"
+
+set -euo pipefail
+
+export BASE_DIR="$(dirname "${SCRIPT}")"
+export SCRIPT_DIR="${BASE_DIR}/.scripts"
+
+timestamp()
+{
+	/usr/bin/date -Ins -u
+}
+
+say()
+{
+	echo -e "$(timestamp): ${@}"
+}
+
+ok()
+{
+	say "✅ ${@}"
+}
+
+doing()
+{
+	say "👉 ${@}"
+}
+
+err()
+{
+	say "❌ ${@}"
+}
+
+echo_run()
+{
+	local ARGS=("${@}")
+	echo "🚀 ${ARGS[@]@Q}"
+	"${@}"
+}
+
+fail()
+{
+	err "${@}" 1>&2
+	exit ${EXIT_CODE:-1}
+}
+
+usage()
+{
+	echo -e "usage: ${BASH_ARGV0:-${BASH_SOURCE:-${0}}} cert-file [ cert-name ]"
+	exit 1
+}
+
+[ ${#} -ge 1 ] || usage
+[ ${#} -le 2 ] || usage
+
+CERT_FILE="${1}"
+[ -n "${CERT_FILE}" ] || fail "The certificate file path may not be the empty string"
+[ -e "${CERT_FILE}" ] || fail "No certificate file [${CERT_FILE}] was found"
+[ -f "${CERT_FILE}" ] || fail "The path [${CERT_FILE}] is not a regular file"
+[ -r "${CERT_FILE}" ] || fail "The file [${CERT_FILE}] is not readable"
+
+if [ ${#} -eq 2 ] ; then
+	CERT_NAME="${2}"
+	[ -n "${CERT_NAME}" ] || fail "The certificate name may not be the empty string (don't specify to compute it from the certificate's subject)"
+else
+	# Try to get the certificate's subject as its name
+	CERT_NAME="$(openssl x509 -noout -in "${CERT_FILE}" -subject | sed -e 's;^[^=]\+\s*=\s*;;g')"
+fi
+
+if [ $(/usr/bin/id -u) == 0 ] ; then
+	CA_UPDATER=()
+	CA_UPDATER+=(update-ca-trust:/etc/pki/ca-trust/source/anchors)
+	CA_UPDATER+=(update-ca-certificates:/usr/local/share/ca-certificates/)
+	for UPDATER in "${CA_UPDATER[@]}" ; do
+		IFS=":" read EXE TARGET <<< "${UPDATER}"
+		if type -P "${EXE}" &>/dev/null ; then
+			echo_run cp -vf "${CERT_FILE}" "${TARGET}"
+			RC=0
+			echo_run "${EXE}" || RC=${?}
+			[ ${RC} -eq 0 ] || echo "WARNING: ${EXE} returned ${RC} ... certificate trusts may be incomplete!"
+			break
+		fi
+	done
+else
+	echo_run sudo -EH "${0}" "${@}"
+	# Now we keep going to do the user-level trusts
+fi
+
+FIRST="true"
+while read DB ; do
+	"${FIRST}" && say "🔒 Installing the certificate from [${CERT_FILE}] (${CERT_NAME}) for $(/usr/bin/id -un)..."
+	FIRST="false"
+	DB="$(readlink -f "${DB}")"
+	DB_DIR="$(dirname "${DB}")"
+
+	case "${DB}" in
+		*/cert8.db ) DB_TYPE="dbm" ;;
+		*/cert9.db ) DB_TYPE="sql" ;;
+		* ) continue ;;
+	esac
+
+	doing "Installing the certificate into the DB [${DB}]..."
+	certutil -A -n "${CERT_NAME}" -t "TC,C,T" -i "${CERT_FILE}" -d "${DB_TYPE}:${DB_DIR}" && ok "\tCertificate installed!" || err "Installation failed (rc=${?})!"
+done < <(find ~/.mozilla ~/.thunderbird ~/.pki -type f -name 'cert*.db' 2>/dev/null | sort)

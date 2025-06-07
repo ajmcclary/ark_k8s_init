@@ -5,66 +5,14 @@ SCRIPT="$(basename "${SCRIPT}")"
 
 set -euo pipefail
 
-[ "$(/usr/bin/id -u)" == "0" ] || exec sudo -EH "${0}" "${@}"
-
-timestamp()
+CERT="/etc/kubernetes/pki/ca.crt"
+TEMPFILE="/tmp/k8s-ca.crt"
+cleanup()
 {
-	/usr/bin/date -Ins -u
+	rm -rf "${TEMPFILE}" &>/dev/null || return 0
 }
 
-say()
-{
-	echo -e "$(timestamp): ${@}"
-}
+cp -vf "${CERT}" "${TEMPFILE}"
+trap cleanup EXIT
 
-fail()
-{
-	say "❌ ${@}" 1>&2
-	exit ${EXIT_CODE:-1}
-}
-
-echo_run()
-{
-	local ARGS=("${@}")
-	echo "${ARGS[@]@Q}"
-	"${@}"
-}
-
-CA_UPDATER=()
-CA_UPDATER+=(update-ca-trust:/etc/pki/ca-trust/source/anchors)
-CA_UPDATER+=(update-ca-certificates:/usr/local/share/ca-certificates/)
-for updater in "${CA_UPDATER[@]}" ; do
-	IFS=":" read ca target <<< "${updater}"
-	if type -P "${ca}" &>/dev/null ; then
-		echo_run cp -vf /etc/kubernetes/pki/ca.crt "${target}"/k8s-ca.crt
-		RC=0
-		echo_run "${ca}" || RC=${?}
-		[ ${RC} -eq 0 ] || echo "WARNING: ${ca} returned ${RC} ... certificate trusts may be incomplete!"
-		break
-	fi
-done
-
-# Create a secret that contains the K8s CA
-NS="kube-system"
-NAME="kube-ca"
-SECRET="
----
-apiVersion: v1
-kind: Secret
-metadata:
-  namespace: ${NS}
-  name: ${NAME}
-type: Opaque
-stringData:
-  crt: |-
-$(cat /etc/kubernetes/pki/ca.crt | sed -e 's;^;    ;g')
-  key: |-
-$(cat /etc/kubernetes/pki/ca.key | sed -e 's;^;    ;g')
-"
-
-LABEL="Creating"
-COMMAND="create"
-kubectl --namespace "${NS}" get secret "${NAME}" &>/dev/null && COMMAND="apply" && LABEL="Updating"
-
-say "${LABEL} the secret ${NS}::${NAME} with the Kubernetes CAs"
-kubectl --namespace "${NS}" "${COMMAND}" -f - <<< "${SECRET}"
+"${BASEDIR}/trust-cert" "${TEMPFILE}"

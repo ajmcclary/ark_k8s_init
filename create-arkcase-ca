@@ -1,0 +1,100 @@
+#!/bin/bash
+SCRIPT="$(readlink -f "${BASH_SOURCE:-${0}}")"
+
+set -euo pipefail
+
+export BASE_DIR="$(dirname "${SCRIPT}")"
+export SCRIPT_DIR="${BASE_DIR}/.scripts"
+export CONF_DIR="${BASE_DIR}/conf"
+
+timestamp()
+{
+	/usr/bin/date -Ins -u
+}
+
+say()
+{
+	echo -e "$(timestamp): ${@}"
+}
+
+ok()
+{
+	say "✅ ${@}"
+}
+
+doing()
+{
+	say "👉 ${@}"
+}
+
+err()
+{
+	say "❌ ${@}"
+}
+
+fail()
+{
+	err "${@}" 1>&2
+	exit ${EXIT_CODE:-1}
+}
+
+CONTEXT="local"
+NAMESPACE="arkcase-system"
+SECRET_NAME="arkcase-ca"
+
+# Check if the CA exists in the cluster
+EXISTS="false"
+kubectl --context "${CONTEXT}" --namespace "${NAMESPACE}" get secret "${SECRET_NAME}" &>/dev/null && EXISTS="true"
+
+# If it exists, check validity
+if as_boolean "${EXISTS}" ; then
+	CERT="$(kubectl --context "${CONTEXT}" --namespace "${NAMESPACE}" get secret "${SECRET_NAME}" -o json | jq -r '.data.crt // ""' | base64 -d)"
+	if [ -n "${CERT}" ] ; then
+		# Check validity (it's a CA and isn't expired)
+		:
+	else
+		# No certificate in the secret, so it doesn't exist
+		EXISTS="false"
+	fi
+
+	# Delete the existing secret b/c it's invalid ...
+	kubectl --context "${CONTEXT}" --namespace "${NAMESPACE}" delete secret "${SECRET_NAME}"
+fi
+
+as_boolean "${EXISTS}" && quit "The ArkCase CA already exists and is still valid"
+
+# Create the new CA!
+doing "Rendering a new CA certificate for ArkCase"
+TEMPDIR="$(mktemp -d)"
+CERT="${TEMPDIR}/ca.crt"
+KEY="${TEMPDIR}/ca.key"
+CONF="${TEMPDIR}/openssl.cnf"
+# TODO: Render config
+openssl req \
+	-days 3650 \
+	-nodes -new -x509 \
+	-keyout "${KEY}" \
+	-out "${CERT}" \
+	-config "${CONF}" \
+	"${@}" || fail "Failed to render a new CA certificate"
+ok "CA Certificate was rendered!"
+
+SECRET="
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  namespace: ${NAMESPACE}
+  name: ${SECRET_NAME}
+type: Opaque
+stringData:
+  crt: |-
+$(cat "${CERT}" | sed -e 's;^;    ;g')
+  key: |-
+$(cat "${KEY}" | sed -e 's;^;    ;g')
+"
+
+say "Creating the secret ${NAMESPACE}::${SECRET_NAME} with the ArkCase CA"
+kubectl --context "${CONTEXT}" --namespace "${NAMESPACE}" create -f - <<< "${SECRET}"
+
+"${SCRIPT_DIR}/trust-cert" "${CERT}" "arkcase-root-ca"
