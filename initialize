@@ -86,6 +86,11 @@ if [ "$(/usr/bin/id -u)" != "0" ] ; then
 	"${SCRIPT_DIR}/init-aws-config"
 
 	#
+	# Create the root CA for ArkCase
+	#
+	"${BASE_DIR}/create-arkcase-ca"
+
+	#
 	# Wait for the pods to finish booting
 	#
 	"${SCRIPT_DIR}/wait-for-pods"

@@ -31,6 +31,18 @@ err()
 	say "❌ ${@}"
 }
 
+quit()
+{
+	say "🚪 ${@}"
+	exit 0
+}
+
+fail()
+{
+	err "${@}" 1>&2
+	exit ${EXIT_CODE:-1}
+}
+
 validate_cert_secret()
 {
 	local CONTEXT="${1}"
@@ -48,10 +60,10 @@ validate_cert_secret()
 	CERT="$(jq --arg key "${KEY}" -r '.data[$key] // ""' 2>/dev/null <<< "${JSON}" | base64 -d 2>/dev/null)" || return 1
 
 	# Verify the certificate
-	openssl verify <(echo -n "${CERT}") &>/dev/null || return 1
+	openssl verify -x509_strict <(echo -n "${CERT}") &>/dev/null || return 1
 
 	# Verify that it's a CA certificate
-	openssl x509 -noout -in <(echo -n "${CERT}") -ext basicConstraints | tail -n +2 | grep -q -i -e '^[[:space:]]*CA:TRUE$' || return 1
+	openssl x509 -noout -in <(echo -n "${CERT}") -ext basicConstraints | tr ',' '\n' | tail -n +2 | grep -q -i -e '^[[:space:]]*CA:TRUE[[:space:]]*$' || return 1
 
 	# Ok ... it's valid, and is a CA ... use it!
 	return 0
@@ -62,18 +74,14 @@ cleanup()
 	[ -v TEMPDIR ] && [ -n "${TEMPDIR}" ] && [ -d "${TEMPDIR}" ] && rm -rf "${TEMPDIR}" &>/dev/null
 }
 
-fail()
-{
-	err "${@}" 1>&2
-	exit ${EXIT_CODE:-1}
-}
-
 CONTEXT="local"
 NAMESPACE="arkcase-system"
-SECRET_NAME="arkcase-ca"
+SECRET_NAME="arkcase-root-ca"
+CERT_NAME="arkcase-root-ca"
 
 # Check if the CA exists in the cluster
 EXISTS="true"
+doing "Attempting to validate the existing certificate"
 validate_cert_secret "${CONTEXT}" "${NAMESPACE}" "${SECRET_NAME}" "crt" && quit "The ArkCase CA already exists and is still valid (from ${NAMESPACE}::${SECRET_NAME})"
 
 # Delete the existing stuff, if any
@@ -98,6 +106,8 @@ openssl req \
 	-days 3650 \
 	-key "${KEY}" \
 	-out "${CERT}" \
+	-addext "keyUsage=critical,keyCertSign,cRLSign" \
+	-addext "basicConstraints=critical,CA:TRUE,pathlen:1" \
 	-subj "/CN=ArkCase Root CA/" || fail "Failed to render a new CA certificate"
 ok "The new CA Certificate was rendered!"
 
@@ -111,6 +121,8 @@ kubectl \
 	--namespace "${NAMESPACE}" \
 	create secret generic "${SECRET_NAME}" \
 	--from-file=crt="${CERT}" \
-	--from-file=key="${KEY}" \
+	--from-file=key="${KEY}" || fail "Failed to create the secret (rc=${?})!"
+ok "Secret created!"
 
-"${SCRIPT_DIR}/trust-cert" "${CERT}" "arkcase-root-ca"
+doing "Adding the generated certificate to all required truststores"
+"${SCRIPT_DIR}/trust-cert" "${CERT}" "${CERT_NAME}"
