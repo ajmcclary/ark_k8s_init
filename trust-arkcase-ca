@@ -1,0 +1,99 @@
+#!/bin/bash
+SCRIPT="$(readlink -f "${BASH_SOURCE:-${0}}")"
+
+set -euo pipefail
+
+export BASE_DIR="$(dirname "${SCRIPT}")"
+export SCRIPT_DIR="${BASE_DIR}/.scripts"
+
+timestamp()
+{
+	/usr/bin/date -Ins -u
+}
+
+say()
+{
+	echo -e "$(timestamp): ${@}"
+}
+
+ok()
+{
+	say "✅ ${@}"
+}
+
+doing()
+{
+	say "👉 ${@}"
+}
+
+err()
+{
+	say "❌ ${@}"
+}
+
+quit()
+{
+	say "🚪 ${@}"
+	exit 0
+}
+
+fail()
+{
+	err "${@}" 1>&2
+	exit ${EXIT_CODE:-1}
+}
+
+cleanup()
+{
+	[ -v CERT_FILE ] && [ -n "${CERT_FILE}" ] && [ -d "${CERT_FILE}" ] && rm -rf "${CERT_FILE}" &>/dev/null
+}
+
+usage()
+{
+	echo -e "usage: ${BASH_ARGV0:-${BASH_SOURCE:-${0}}} [ release ]"
+	exit 1
+}
+
+CONTEXT="local"
+RELEASE="arkcase"
+
+[ ${#} -le 1 ] || usage
+
+if [ ${#} -eq 1 ] ; then
+	RELEASE="${1}"
+	[ -n "${RELEASE}" ] || fail "The release name may not be the empty string"
+	[[ "${RELEASE,,}" =~ ^([a-z0-9][-a-z0-9]*)?[a-z0-9]$ ]] || fail "The release name [${RELEASE}] is not valid"
+	RELEASE="${RELEASE,,}"
+fi
+
+CERT_FILE="$(mktemp)"
+trap cleanup EXIT
+ok "Will search for releases named [${RELEASE}] in all namespaces"
+while read NAMESPACE POD READY STATUS RESTARTS AGE IP REST ; do
+	doing "Applying the trust for the ${NAMESPACE} namespace (pod ${POD}, IP ${IP})"
+
+	doing "Check the readiness status for the pod..."
+	# Wait until it's ready, skip if timed out
+	if ! kubectl --context "${CONTEXT}" --namespace "${NAMESPACE}" wait --for condition=Ready pod "${POD}" --timeout 30s &>/dev/null ; then
+		err "Timed out waiting for the pod to be ready (rc=${?})"
+		continue
+	fi
+
+	ok "The pod is ready! Applying the trust..."
+
+	# Get the certificate!
+	if ! curl -k -fsSL -o "${CERT_FILE}" "https://${IP}:9000/roots.pem" ; then
+		err "Failed to fetch the root CA (rc=${?})"
+		continue
+	fi
+
+	ok "Certificate found:\n$(openssl x509 -noout -text -in "${CERT_FILE}")"
+
+	# TODO: Split the cert file in case it contains multiple CAs?
+
+	if "${SCRIPT_DIR}/trust-cert" "${CERT_FILE}" ; then
+		ok "Trust for the CA applied!"
+	else
+		err "Failed to apply the trust for the CA (rc=${?})"
+	fi
+done < <(kubectl --context "${CONTEXT}" get pod --all-namespaces --selector "app.kubernetes.io/instance=${RELEASE},app.kubernetes.io/name=acme" --no-headers -o wide)
