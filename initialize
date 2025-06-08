@@ -157,6 +157,7 @@ EXTRA_PACKAGES=(
 	git
 	gnupg
 	jq
+	libnss3-tools
 	moreutils
 	net-tools
 	procps
