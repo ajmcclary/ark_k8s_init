@@ -103,13 +103,14 @@ openssl genrsa -out "${KEY}" ${KEYBITS} || fail "Failed to render a new private 
 ok "A new ${KEYBITS} bit private key was rendered!"
 openssl req \
 	-new -x509 -nodes \
-	-days 3650 \
+	-days 36500 \
 	-key "${KEY}" \
 	-out "${CERT}" \
 	-addext "keyUsage=critical,keyCertSign,cRLSign" \
 	-addext "basicConstraints=critical,CA:TRUE,pathlen:1" \
 	-subj "/CN=ArkCase Root CA/" || fail "Failed to render a new CA certificate"
-ok "The new CA Certificate was rendered!"
+ok "The new CA Certificate was rendered:\n\n$(openssl x509 -noout -text -in "${CERT}")\n\n" || \
+	fail "Failed to read back the generated certificate"
 
 say "Creating the secret ${NAMESPACE}::${SECRET_NAME} with the ArkCase CA"
 
