@@ -77,7 +77,6 @@ cleanup()
 CONTEXT="local"
 NAMESPACE="arkcase-system"
 SECRET_NAME="arkcase-root-ca"
-CERT_NAME="arkcase-root-ca"
 
 # Check if the CA exists in the cluster
 EXISTS="true"
@@ -101,14 +100,23 @@ KEY="${TEMPDIR}/ca.key"
 doing "Rendering a new CA certificate for ArkCase"
 openssl genrsa -out "${KEY}" ${KEYBITS} || fail "Failed to render a new private key for the CA"
 ok "A new ${KEYBITS} bit private key was rendered!"
+OPENSSL_CONFIG="$(cat <<-EOF
+	[ req ]
+	distinguished_name=dn
+	[ dn ]
+	[ ext ]
+	basicConstraints=critical,CA:TRUE,pathlen:1
+	keyUsage=critical,keyCertSign,cRLSign
+EOF
+)"
 openssl req \
 	-new -x509 -nodes \
 	-days 36500 \
 	-key "${KEY}" \
 	-out "${CERT}" \
-	-addext "keyUsage=critical,keyCertSign,cRLSign" \
-	-addext "basicConstraints=critical,CA:TRUE,pathlen:1" \
-	-subj "/CN=ArkCase Root CA/" || fail "Failed to render a new CA certificate"
+	-config <(echo "${OPENSSL_CONFIG}") \
+	-extensions ext \
+	-subj "/CN=ArkCase Global Root CA/" || fail "Failed to render a new CA certificate"
 ok "The new CA Certificate was rendered:\n\n$(openssl x509 -noout -text -in "${CERT}")\n\n" || \
 	fail "Failed to read back the generated certificate"
 
@@ -126,4 +134,4 @@ kubectl \
 ok "Secret created!"
 
 doing "Adding the generated certificate to all required truststores"
-"${SCRIPT_DIR}/trust-cert" "${CERT}" "${CERT_NAME}"
+"${SCRIPT_DIR}/trust-cert" "${CERT}"
