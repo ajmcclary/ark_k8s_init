@@ -7,28 +7,32 @@
 
 set -euo pipefail
 
-say() {
+say()
+{
 	echo -e "${@}"
 }
 
-fail() {
+fail()
+{
 	say "${@}" 1>&2
 	exit ${EXIT_CODE:-1}
 }
 
-list_old_kernels() {
+list_old_kernels()
+{
 	/usr/bin/dpkg -l --robot | \
 		/usr/bin/awk '{ print $2 }' | \
-		/usr/bin/grep '^linux-modules-' | \
-		/usr/bin/grep -v linux-modules-extra- | \
-		/usr/bin/sed -e 's;^linux-modules-;;g' | \
+		/usr/bin/grep '^linux-image-' | \
+		/usr/bin/grep -v '^linux-image-generic-hwe' | \
+		/usr/bin/sed -e 's;^linux-image-;;g' | \
 		/usr/bin/sort -r -V | \
 		/usr/bin/tail -n +2
 }
 
-list_kernel_packages() {
+list_kernel_packages()
+{
 	local VERSION="${1}"
-	/usr/bin/dpkg -l | /usr/bin/fgrep "${VERSION}" | /usr/bin/awk '{ print $2 }'
+	/usr/bin/dpkg -l | /usr/bin/fgrep "${VERSION}" | fgrep "linux-" | /usr/bin/awk '{ print $2 }'
 }
 
 readarray -t KERNELS < <(list_old_kernels)
