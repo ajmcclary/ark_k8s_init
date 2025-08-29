@@ -5,6 +5,12 @@
 # cleaned out.
 #
 
+# This script is Linux-specific - skip on macOS
+if [[ "$OSTYPE" == "darwin"* ]]; then
+	echo "Kernel management is not applicable on macOS."
+	exit 0
+fi
+
 set -euo pipefail
 
 say()

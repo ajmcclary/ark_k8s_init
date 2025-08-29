@@ -10,7 +10,11 @@ set -euo pipefail
 
 say()
 {
-	echo -e "$(date -Ins): ${@}"
+	if [[ "$OSTYPE" == "darwin"* ]]; then
+		echo -e "$(date -u "+%Y-%m-%dT%H:%M:%S.000000000Z"): ${@}"
+	else
+		echo -e "$(date -Ins): ${@}"
+	fi
 }
 
 fail()
@@ -55,10 +59,18 @@ update_from_stdin()
 
 	# Ok so the values look good ... now graft them onto the credentials file
 	say "Re-forming credentials file at [${CREDS_FILE}]..."
-	sed -i \
-		-e '/^\s*\[\s*profile\s\+'"${AWS_PROFILE}"'\s*\]\s*$/,/^\s*\[/{/^\s*\[\s*profile\s\+'"${AWS_PROFILE}"'\s*\]\s*$/d;/^\s*\[/!d}' \
-		-e '/^\s*\[\s*'"${AWS_PROFILE}"'\s*\]\s*$/,/^\s*\[/{/^\s*\[\s*'"${AWS_PROFILE}"'\s*\]\s*$/d;/^\s*\[/!d}' \
-		"${CREDS_FILE}" && \
+	if [[ "$OSTYPE" == "darwin"* ]]; then
+		# macOS sed requires backup extension with -i
+		sed -i '' \
+			-e '/^\s*\[\s*profile\s\+'"${AWS_PROFILE}"'\s*\]\s*$/,/^\s*\[/{/^\s*\[\s*profile\s\+'"${AWS_PROFILE}"'\s*\]\s*$/d;/^\s*\[/!d}' \
+			-e '/^\s*\[\s*'"${AWS_PROFILE}"'\s*\]\s*$/,/^\s*\[/{/^\s*\[\s*'"${AWS_PROFILE}"'\s*\]\s*$/d;/^\s*\[/!d}' \
+			"${CREDS_FILE}"
+	else
+		sed -i \
+			-e '/^\s*\[\s*profile\s\+'"${AWS_PROFILE}"'\s*\]\s*$/,/^\s*\[/{/^\s*\[\s*profile\s\+'"${AWS_PROFILE}"'\s*\]\s*$/d;/^\s*\[/!d}' \
+			-e '/^\s*\[\s*'"${AWS_PROFILE}"'\s*\]\s*$/,/^\s*\[/{/^\s*\[\s*'"${AWS_PROFILE}"'\s*\]\s*$/d;/^\s*\[/!d}' \
+			"${CREDS_FILE}"
+	fi && \
 		cat >> "${CREDS_FILE}" <<- EOF
 		[profile ${AWS_PROFILE}]
 		${ACCESS}
@@ -157,7 +169,11 @@ say "Using the context [${CONTEXT}]..."
 ERR="$(kubectl config get-contexts "${CONTEXT}" 2>&1)" || fail "The context [${CONTEXT}] is invalid (rc=${?}):\n${ERR}"
 
 if kubectl "${CTX[@]}" get node &>/dev/null ; then
-	DOCKER_CONFIG="$(readlink -f ~/.docker/config.json 2>/dev/null)"
+	if [[ "$OSTYPE" == "darwin"* ]]; then
+		DOCKER_CONFIG="$(python3 -c "import os; print(os.path.realpath(os.path.expanduser('~/.docker/config.json')))" 2>/dev/null || echo "")"
+	else
+		DOCKER_CONFIG="$(readlink -f ~/.docker/config.json 2>/dev/null)"
+	fi
 	if [ -n "${DOCKER_CONFIG}" ] && [ -f "${DOCKER_CONFIG}" ] ; then
 		say "Creating Kubernetes secret (${K8S_SECRET}) for [${DOCKER_CONFIG}]..."
 		while read NS ; do

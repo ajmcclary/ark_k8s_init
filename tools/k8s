@@ -16,14 +16,25 @@ say()
 
 __cmd_start()
 {
-	say "Starting K8s services and pods..."
-	( set -x ; sudo systemctl start {,cri-}docker.s{ervice,ocket} kubelet.service )
+	if [[ "$OSTYPE" == "darwin"* ]]; then
+		say "Starting Docker Desktop and Kubernetes..."
+		open -a Docker
+		say "Please ensure Docker Desktop is running with Kubernetes enabled"
+	else
+		say "Starting K8s services and pods..."
+		( set -x ; sudo systemctl start {,cri-}docker.s{ervice,ocket} kubelet.service )
+	fi
 }
 
 __cmd_stop()
 {
-	say "Stopping K8s services and pods..."
-	( set -x ; sudo systemctl stop kubelet.service {cri-,}docker.s{ocket,ervice} )
+	if [[ "$OSTYPE" == "darwin"* ]]; then
+		say "Stopping Docker Desktop..."
+		osascript -e 'quit app "Docker"'
+	else
+		say "Stopping K8s services and pods..."
+		( set -x ; sudo systemctl stop kubelet.service {cri-,}docker.s{ocket,ervice} )
+	fi
 }
 
 __cmd_unjam()

@@ -9,7 +9,11 @@ CALLED="${BASH_SOURCE:-${0}}"
 
 timestamp()
 {
-	date -Ins -u
+	if [[ "$OSTYPE" == "darwin"* ]]; then
+		/bin/date -u "+%Y-%m-%dT%H:%M:%S.000000000Z"
+	else
+		date -Ins -u
+	fi
 }
 
 say()

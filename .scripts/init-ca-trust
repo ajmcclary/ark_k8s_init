@@ -1,18 +1,44 @@
 #!/bin/bash
-SCRIPT="$(readlink -f "${0}")"
+# macOS compatible readlink
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    SCRIPT="$(python3 -c "import os; print(os.path.realpath('${0}'))")"
+else
+    SCRIPT="$(readlink -f "${0}")"
+fi
 BASEDIR="$(dirname "${SCRIPT}")"
 SCRIPT="$(basename "${SCRIPT}")"
 
 set -euo pipefail
 
-CERT="/etc/kubernetes/pki/ca.crt"
 TEMPFILE="/tmp/k8s-ca.crt"
 cleanup()
 {
 	rm -rf "${TEMPFILE}" &>/dev/null || return 0
 }
 
-cp -vf "${CERT}" "${TEMPFILE}"
+if [[ "$OSTYPE" == "darwin"* ]]; then
+	# On macOS, get the certificate from kubectl config
+	if kubectl config view --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' 2>/dev/null | base64 -d > "${TEMPFILE}" 2>/dev/null; then
+		if [[ -s "${TEMPFILE}" ]]; then
+			echo "Retrieved Kubernetes CA certificate from kubectl config"
+		else
+			echo "Warning: Could not extract Kubernetes CA certificate from kubectl config"
+			exit 0
+		fi
+	else
+		echo "Warning: kubectl not configured or no cluster found"
+		exit 0
+	fi
+else
+	CERT="/etc/kubernetes/pki/ca.crt"
+	if [[ -f "${CERT}" ]]; then
+		cp -vf "${CERT}" "${TEMPFILE}"
+	else
+		echo "Warning: Kubernetes CA certificate not found at ${CERT}"
+		exit 0
+	fi
+fi
+
 trap cleanup EXIT
 
 "${BASEDIR}/trust-cert" "${TEMPFILE}"

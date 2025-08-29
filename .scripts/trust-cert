@@ -1,5 +1,10 @@
 #!/bin/bash
-SCRIPT="$(readlink -f "${BASH_SOURCE:-${0}}")"
+# macOS compatible readlink
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    SCRIPT="$(python3 -c "import os; print(os.path.realpath('${BASH_SOURCE:-${0}}'))")"
+else
+    SCRIPT="$(readlink -f "${BASH_SOURCE:-${0}}")"
+fi
 
 set -euo pipefail
 
@@ -8,7 +13,11 @@ export SCRIPT_DIR="${BASE_DIR}/.scripts"
 
 timestamp()
 {
-	/usr/bin/date -Ins -u
+	if [[ "$OSTYPE" == "darwin"* ]]; then
+		/bin/date -u "+%Y-%m-%dT%H:%M:%S.000000000Z"
+	else
+		/usr/bin/date -Ins -u
+	fi
 }
 
 say()
@@ -67,20 +76,26 @@ else
 	CERT_NAME="$(openssl x509 -noout -in "${CERT_FILE}" -subject | sed -e 's;^[^=]\+\s*=\s*;;g')"
 fi
 
-if [ $(/usr/bin/id -u) == 0 ] ; then
-	CA_UPDATER=()
-	CA_UPDATER+=(update-ca-trust:/etc/pki/ca-trust/source/anchors)
-	CA_UPDATER+=(update-ca-certificates:/usr/local/share/ca-certificates/)
-	for UPDATER in "${CA_UPDATER[@]}" ; do
-		IFS=":" read EXE TARGET <<< "${UPDATER}"
-		if type -P "${EXE}" &>/dev/null ; then
-			echo_run cp -vf "${CERT_FILE}" "${TARGET}"
-			RC=0
-			echo_run "${EXE}" || RC=${?}
-			[ ${RC} -eq 0 ] || echo "WARNING: ${EXE} returned ${RC} ... certificate trusts may be incomplete!"
-			break
-		fi
-	done
+if [ $(id -u) == 0 ] ; then
+	if [[ "$OSTYPE" == "darwin"* ]]; then
+		# macOS uses the System keychain for certificate trust
+		doing "Adding certificate to macOS System keychain..."
+		echo_run security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain "${CERT_FILE}"
+	else
+		CA_UPDATER=()
+		CA_UPDATER+=(update-ca-trust:/etc/pki/ca-trust/source/anchors)
+		CA_UPDATER+=(update-ca-certificates:/usr/local/share/ca-certificates/)
+		for UPDATER in "${CA_UPDATER[@]}" ; do
+			IFS=":" read EXE TARGET <<< "${UPDATER}"
+			if type -P "${EXE}" &>/dev/null ; then
+				echo_run cp -vf "${CERT_FILE}" "${TARGET}"
+				RC=0
+				echo_run "${EXE}" || RC=${?}
+				[ ${RC} -eq 0 ] || echo "WARNING: ${EXE} returned ${RC} ... certificate trusts may be incomplete!"
+				break
+			fi
+		done
+	fi
 else
 	echo_run sudo -EH "${0}" "${@}"
 	# Now we keep going to do the user-level trusts
@@ -88,9 +103,13 @@ fi
 
 FIRST="true"
 while read DB ; do
-	"${FIRST}" && say "🔒 Installing the certificate from [${CERT_FILE}] (${CERT_NAME}) for $(/usr/bin/id -un)..."
+	"${FIRST}" && say "🔒 Installing the certificate from [${CERT_FILE}] (${CERT_NAME}) for $(id -un)..."
 	FIRST="false"
-	DB="$(readlink -f "${DB}")"
+	if [[ "$OSTYPE" == "darwin"* ]]; then
+		DB="$(python3 -c "import os; print(os.path.realpath('${DB}'))")"
+	else
+		DB="$(readlink -f "${DB}")"
+	fi
 	DB_DIR="$(dirname "${DB}")"
 
 	case "${DB}" in

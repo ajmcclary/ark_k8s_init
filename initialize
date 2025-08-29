@@ -1,5 +1,10 @@
 #!/bin/bash
-SCRIPT="$(readlink -f "${BASH_SOURCE:-${0}}")"
+# macOS compatible readlink
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    SCRIPT="$(python3 -c "import os; print(os.path.realpath('${BASH_SOURCE:-${0}}'))")"
+else
+    SCRIPT="$(readlink -f "${BASH_SOURCE:-${0}}")"
+fi
 
 set -euo pipefail
 
@@ -9,7 +14,11 @@ export CONF_DIR="${BASE_DIR}/conf"
 
 timestamp()
 {
-	/usr/bin/date -Ins -u
+	if [[ "$OSTYPE" == "darwin"* ]]; then
+		/bin/date -u "+%Y-%m-%dT%H:%M:%S.000000000Z"
+	else
+		/usr/bin/date -Ins -u
+	fi
 }
 
 say()
@@ -40,19 +49,26 @@ fail()
 
 list_kernels()
 {
-	dpkg -l | egrep "linux-image-[56]" | awk '{ print $2 }' | sort -u
+	if [[ "$OSTYPE" == "darwin"* ]]; then
+		# macOS doesn't have multiple kernels like Linux
+		uname -r
+	else
+		dpkg -l | egrep "linux-image-[56]" | awk '{ print $2 }' | sort -u
+	fi
 }
 
-if [ "$(/usr/bin/id -u)" != "0" ] ; then
+if [[ "$(id -u)" != "0" ]] ; then
 
 	# Make sure these are visible "below"
-	[ -v CLUSTER_CIDR ] && export CLUSTER_CIDR
-	[ -v SERVICE_CIDR ] && export SERVICE_CIDR
+	[[ -n "${CLUSTER_CIDR:-}" ]] && export CLUSTER_CIDR
+	[[ -n "${SERVICE_CIDR:-}" ]] && export SERVICE_CIDR
 
-	#
-	# Take stock of the kernel versions installed
-	#
-	OLD_KERNELS="$(list_kernels)" || true
+	if [[ "$OSTYPE" != "darwin"* ]]; then
+		#
+		# Take stock of the kernel versions installed (Linux only)
+		#
+		OLD_KERNELS="$(list_kernels)" || true
+	fi
 
 	#
 	# Do the rooty-things
@@ -61,10 +77,12 @@ if [ "$(/usr/bin/id -u)" != "0" ] ; then
 	sudo -EH "${0}" "${@}" || fail "Root installation tasks failed (rc=${?})!"
 	ok "Root portions completed!"
 
-	#
-	# Take stock of the new kernel versions installed
-	#
-	NEW_KERNELS="$(list_kernels)" || true
+	if [[ "$OSTYPE" != "darwin"* ]]; then
+		#
+		# Take stock of the new kernel versions installed (Linux only)
+		#
+		NEW_KERNELS="$(list_kernels)" || true
+	fi
 
 	#
 	# Now do the things that my user needs
@@ -115,9 +133,11 @@ if [ "$(/usr/bin/id -u)" != "0" ] ; then
 	fi
 	echo ""
 
-	if [ "${OLD_KERNELS}" != "${NEW_KERNELS}" ] ; then
-		doing "New kernels were installed, it's strongly recommended that you reboot to ensure the latest software is running."
-		echo ""
+	if [[ "$OSTYPE" != "darwin"* ]]; then
+		if [[ "${OLD_KERNELS}" != "${NEW_KERNELS}" ]] ; then
+			doing "New kernels were installed, it's strongly recommended that you reboot to ensure the latest software is running."
+			echo ""
+		fi
 	fi
 
 	exit 0
@@ -132,59 +152,117 @@ fi
 is_installed()
 {
 	local PKG="${1}"
-	apt -qq list "${PKG}" --installed 2>/dev/null | fgrep -q  "[installed]" && return 0
-	return 1
+	if [[ "$OSTYPE" == "darwin"* ]]; then
+		# Check if installed via Homebrew (must run as non-root)
+		if [[ -n "${SUDO_USER:-}" ]]; then
+			sudo -u "${SUDO_USER}" brew list "${PKG}" &>/dev/null && return 0
+		fi
+		# Also check if command exists (for system tools)
+		command -v "${PKG}" &>/dev/null && return 0
+		return 1
+	else
+		apt -qq list "${PKG}" --installed 2>/dev/null | fgrep -q  "[installed]" && return 0
+		return 1
+	fi
 }
 
 TRUSTED_GPG_DIR="/etc/apt/trusted.gpg.d"
 APT_SOURCES_DIR="/etc/apt/sources.list.d"
 
-[ -v SUDO_USER ] && ok "Privileges escalated! Proceeding with the installation"
+[[ -n "${SUDO_USER:-}" ]] && ok "Privileges escalated! Proceeding with the installation"
 
 #
 # Full updates
 #
-doing "Performing a full package update..."
-apt-get update && apt-get -f -y dist-upgrade && apt-get clean
+if [[ "$OSTYPE" == "darwin"* ]]; then
+	doing "Updating Homebrew and packages..."
+	# Homebrew must be run as non-root user on macOS
+	if [[ -n "${SUDO_USER:-}" ]]; then
+		# Running as root via sudo, use the original user
+		if ! sudo -u "${SUDO_USER}" command -v brew &>/dev/null; then
+			doing "Installing Homebrew as ${SUDO_USER}..."
+			sudo -u "${SUDO_USER}" /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+		fi
+		sudo -u "${SUDO_USER}" brew update && sudo -u "${SUDO_USER}" brew upgrade
+	else
+		# Not running via sudo - this shouldn't happen as we escalate earlier
+		err "Script should be run with sudo on macOS"
+		exit 1
+	fi
+else
+	doing "Performing a full package update..."
+	apt-get update && apt-get -f -y dist-upgrade && apt-get clean
+fi
 
 #
 # Extra packages
 #
-EXTRA_PACKAGES=(
-	apt-transport-https
-	ca-certificates
-	curl
-	git
-	gnupg
-	jq
-	libnss3-tools
-	moreutils
-	net-tools
-	procps
-	screen
-	telnet
-	wget
-)
+if [[ "$OSTYPE" == "darwin"* ]]; then
+	EXTRA_PACKAGES=(
+		curl
+		git
+		gnupg
+		jq
+		nss
+		moreutils
+		screen
+		telnet
+		wget
+		coreutils
+	)
+else
+	EXTRA_PACKAGES=(
+		apt-transport-https
+		ca-certificates
+		curl
+		git
+		gnupg
+		jq
+		libnss3-tools
+		moreutils
+		net-tools
+		procps
+		screen
+		telnet
+		wget
+	)
+fi
+
 MISSING_PACKAGES=()
 for P in "${EXTRA_PACKAGES[@]}" ; do
 	is_installed "${P}" || MISSING_PACKAGES+=("${P}")
 done
-if [ ${#MISSING_PACKAGES[@]} -eq 0 ] ; then
+if [[ ${#MISSING_PACKAGES[@]} -eq 0 ]] ; then
 	ok "All required packages are installed"
 else
-	doing "Installing extra packages: [${MISSING_PACKAGES[@]}]..."
-	apt-get install -y "${MISSING_PACKAGES[@]}"
+	if [[ "$OSTYPE" == "darwin"* ]]; then
+		doing "Installing extra packages: [${MISSING_PACKAGES[@]}]..."
+		if [[ -n "${SUDO_USER:-}" ]]; then
+			sudo -u "${SUDO_USER}" brew install "${MISSING_PACKAGES[@]}"
+		else
+			err "Script should be run with sudo on macOS"
+			exit 1
+		fi
+	else
+		doing "Installing extra packages: [${MISSING_PACKAGES[@]}]..."
+		apt-get install -y "${MISSING_PACKAGES[@]}"
+	fi
 fi
 
 #
 # Disable swap
 #
-if [ -z "$(swapon --show --noheadings --raw)" ] ; then
-	ok "Swap is disabled as required by Kubernetes"
+if [[ "$OSTYPE" == "darwin"* ]]; then
+	# macOS doesn't typically use swap files in the same way
+	ok "Swap management not required on macOS"
 else
-	doing "Disabling swap (required by Kubernetes)"
-	swapoff -a
-	grep -v "[[:space:]]swap[[:space:]]" /etc/fstab | sponge /etc/fstab
+	if [[ -z "$(swapon --show --noheadings --raw)" ]] ; then
+		ok "Swap is disabled as required by Kubernetes"
+	else
+		doing "Disabling swap (required by Kubernetes)"
+		swapoff -a
+		grep -v "[[:space:]]swap[[:space:]]" /etc/fstab | sponge /etc/fstab
+	fi
 fi
 
 #
@@ -192,64 +270,107 @@ fi
 #
 if ! docker ps -a &>/dev/null ; then
 	if ! is_installed docker ; then
-		[ -v DOCKER_DISTRO ] || DOCKER_DISTRO=""
-		[ -n "${DOCKER_DISTRO}" ] || DOCKER_DISTRO="jammy"
-		doing "Installing Docker..."
-		rm -f "${TRUSTED_GPG_DIR}/docker.gpg" &>/dev/null || true
-		curl -fsSL "https://download.docker.com/linux/ubuntu/gpg" | gpg --dearmor -o "${TRUSTED_GPG_DIR}/docker.gpg"
-		chmod a+r "${TRUSTED_GPG_DIR}/docker.gpg"
-		echo "deb [arch=amd64] https://download.docker.com/linux/ubuntu ${DOCKER_DISTRO} stable" > "${APT_SOURCES_DIR}/docker.list"
-		apt-get update
+		if [[ "$OSTYPE" == "darwin"* ]]; then
+			doing "Installing Docker Desktop for macOS..."
+			# Check if Docker Desktop is already installed
+			if [[ ! -d "/Applications/Docker.app" ]]; then
+				if [[ -n "${SUDO_USER:-}" ]]; then
+					sudo -u "${SUDO_USER}" brew install --cask docker
+				else
+					err "Script should be run with sudo on macOS"
+					exit 1
+				fi
+				doing "Docker Desktop installed. Please start Docker Desktop from Applications."
+				doing "Waiting for Docker to start..."
+				# Wait for Docker to be available
+				for i in {1..30}; do
+					if docker ps &>/dev/null; then
+						break
+					fi
+					sleep 2
+				done
+			fi
+		else
+			[[ -n "${DOCKER_DISTRO:-}" ]] || DOCKER_DISTRO=""
+			[[ -n "${DOCKER_DISTRO}" ]] || DOCKER_DISTRO="jammy"
+			doing "Installing Docker..."
+			rm -f "${TRUSTED_GPG_DIR}/docker.gpg" &>/dev/null || true
+			curl -fsSL "https://download.docker.com/linux/ubuntu/gpg" | gpg --dearmor -o "${TRUSTED_GPG_DIR}/docker.gpg"
+			chmod a+r "${TRUSTED_GPG_DIR}/docker.gpg"
+			echo "deb [arch=amd64] https://download.docker.com/linux/ubuntu ${DOCKER_DISTRO} stable" > "${APT_SOURCES_DIR}/docker.list"
+			apt-get update
 
-		mkdir -p /etc/docker
-		cat <<-EOF > /etc/docker/daemon.json
-		{
-			"ipv6": false,
-			"exec-opts": ["native.cgroupdriver=systemd"],
-			"log-driver": "json-file",
-			"log-opts": {"max-size": "100m" },
-			"storage-driver": "overlay2"
-		}
-		EOF
-		apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-		[ -v SUDO_USER ] && usermod -a -G docker "${SUDO_USER}"
+			mkdir -p /etc/docker
+			cat <<-EOF > /etc/docker/daemon.json
+			{
+				"ipv6": false,
+				"exec-opts": ["native.cgroupdriver=systemd"],
+				"log-driver": "json-file",
+				"log-opts": {"max-size": "100m" },
+				"storage-driver": "overlay2"
+			}
+			EOF
+			apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+			[[ -n "${SUDO_USER:-}" ]] && usermod -a -G docker "${SUDO_USER}"
+		fi
 	fi
 	ok "Docker is already installed"
 
-	doing "Enabling the Docker service..."
-	systemctl enable --now docker.service docker.socket
+	if [[ "$OSTYPE" == "darwin"* ]]; then
+		doing "Ensuring Docker is running..."
+		if ! docker ps &>/dev/null; then
+			err "Docker is not running. Please start Docker Desktop from Applications."
+			exit 1
+		fi
+	else
+		doing "Enabling the Docker service..."
+		systemctl enable --now docker.service docker.socket
+	fi
 	docker run hello-world
 fi
 ok "Docker is installed and running"
 
-if ! systemctl is-active --quiet cri-docker.service  ; then
-	if ! is_installed cri-dockerd ; then
-		[ -v CRI_VER ] || CRI_VER=""
-		[ -n "${CRI_VER}" ] || CRI_VER="0.3.16"
-		[ -v CRI_DISTRO ] || CRI_DISTRO=""
-		[ -n "${CRI_DISTRO}" ] || CRI_DISTRO="jammy"
-		doing "Installing CRI-Docker v${CRI_VER} (${CRI_DISTRO})..."
-		wget "https://github.com/Mirantis/cri-dockerd/releases/download/v${CRI_VER}/cri-dockerd_${CRI_VER}.3-0.ubuntu-${CRI_DISTRO}_amd64.deb"
-		apt-get install -y "./cri-dockerd_${CRI_VER}.3-0.ubuntu-${CRI_DISTRO}_amd64.deb"
-		rm -rf "./cri-dockerd_${CRI_VER}.3-0.ubuntu-${CRI_DISTRO}_amd64.deb" || true
-	fi
-	ok "CRI-Docker is installed"
+if [[ "$OSTYPE" == "darwin"* ]]; then
+	# macOS with Docker Desktop doesn't need separate CRI-Docker
+	ok "CRI-Docker not needed on macOS with Docker Desktop"
+else
+	if ! systemctl is-active --quiet cri-docker.service  ; then
+		if ! is_installed cri-dockerd ; then
+			[[ -n "${CRI_VER:-}" ]] || CRI_VER="0.3.16"
+			[[ -n "${CRI_DISTRO:-}" ]] || CRI_DISTRO=""
+			[[ -n "${CRI_DISTRO}" ]] || CRI_DISTRO="jammy"
+			doing "Installing CRI-Docker v${CRI_VER} (${CRI_DISTRO})..."
+			wget "https://github.com/Mirantis/cri-dockerd/releases/download/v${CRI_VER}/cri-dockerd_${CRI_VER}.3-0.ubuntu-${CRI_DISTRO}_amd64.deb"
+			apt-get install -y "./cri-dockerd_${CRI_VER}.3-0.ubuntu-${CRI_DISTRO}_amd64.deb"
+			rm -rf "./cri-dockerd_${CRI_VER}.3-0.ubuntu-${CRI_DISTRO}_amd64.deb" || true
+		fi
+		ok "CRI-Docker is installed"
 
-	doing "Enabling CRI-Docker..."
-	systemctl enable --now cri-docker.service cri-docker.socket
-	# This will verify that it's running
-	systemctl is-active --quiet cri-docker.service
+		doing "Enabling CRI-Docker..."
+		systemctl enable --now cri-docker.service cri-docker.socket
+		# This will verify that it's running
+		systemctl is-active --quiet cri-docker.service
+	fi
+	ok "CRI-Docker is installed and running"
 fi
-ok "CRI-Docker is installed and running"
 
 #
 # Install Helm
 #
 if ! helm version &>/dev/null ; then
-	[ -v HELM_VER ] || HELM_VER=""
-	[ -n "${HELM_VER}" ] || HELM_VER="3.15.2"
+	[[ -n "${HELM_VER:-}" ]] || HELM_VER=""
+	[[ -n "${HELM_VER}" ]] || HELM_VER="3.15.2"
 	doing "Installing Helm v${HELM_VER}..."
-	curl -fsSL https://get.helm.sh/helm-v${HELM_VER}-linux-amd64.tar.gz | tar -C /usr/local/bin --strip-components=1 -xzvf - linux-amd64/helm
+	if [[ "$OSTYPE" == "darwin"* ]]; then
+		if [[ -n "${SUDO_USER:-}" ]]; then
+			sudo -u "${SUDO_USER}" brew install helm
+		else
+			err "Script should be run with sudo on macOS"
+			exit 1
+		fi
+	else
+		curl -fsSL https://get.helm.sh/helm-v${HELM_VER}-linux-amd64.tar.gz | tar -C /usr/local/bin --strip-components=1 -xzvf - linux-amd64/helm
+	fi
 	helm version &>/dev/null
 fi
 ok "Helm is installed"
@@ -257,68 +378,107 @@ ok "Helm is installed"
 #
 # Install/Upgrade Kubernetes
 #
-[ -v K8S_VER ] || K8S_VER=""
-[ -n "${K8S_VER}" ] || K8S_VER="1.32"
+[[ -n "${K8S_VER:-}" ]] || K8S_VER=""
+[[ -n "${K8S_VER}" ]] || K8S_VER="1.32"
 
-K8S_UPGRADE_VER=""
-if KUBEADM_VER="$(kubeadm version -o json)" ; then
-	KUBEADM_VER="$(jq -r '.clientVersion.major + "." + .clientVersion.minor' <<< "${KUBEADM_VER}")"
-
-	# Try to see if there's an upgrade plan available
-	#
-	# Wait for this to take effect, though...
-	if kubectl --context "local" --namespace "calico-system" get pods &>/dev/null ; then
-		doing "Rebooting Calico (just in case)..."
-		kubectl --context "local" --namespace "calico-system" delete pod --selector k8s-app=calico-node &>/dev/null || true
-		kubectl --context "local" --namespace "calico-system" delete pod --selector k8s-app=calico-typha &>/dev/null || true
-		doing "Waiting for Calico to reboot..."
-		kubectl --context "local" --namespace "calico-system" wait --timeout=30s --for condition=Ready pod --selector k8s-app=calico-typha &>/dev/null || err "Calico typha reboot timed out"
-		kubectl --context "local" --namespace "calico-system" wait --timeout=30s --for condition=Ready pod --selector k8s-app=calico-node &>/dev/null || err "Calico node reboot timed out"
-	fi
-
-	if kubectl --context "local" get nodes &>/dev/null ; then
-		doing "Fetching any potential upgrade information..."
-		if K8S_UPGRADE_PLAN="$(kubeadm upgrade plan -o json 2>/dev/null)" ; then
-			K8S_UPGRADE_VER="$(jq -r '.availableUpgrades[].components[] | select(.name == "kube-apiserver") | select(.currentVersion != .newVersion) | .newVersion' <<< "${K8S_UPGRADE_PLAN}")"
+if [[ "$OSTYPE" == "darwin"* ]]; then
+	# For macOS, we'll use kubectl with Docker Desktop's Kubernetes or kind/minikube
+	if ! kubectl version --client &>/dev/null ; then
+		doing "Installing kubectl..."
+		if [[ -n "${SUDO_USER:-}" ]]; then
+			sudo -u "${SUDO_USER}" brew install kubectl
 		else
-			err "Could not compute an upgrade plan ... maybe it's not needed?"
+			err "Script should be run with sudo on macOS"
+			exit 1
 		fi
 	fi
+	
+	# Check if we need kind or minikube for local Kubernetes
+	if ! kubectl get nodes &>/dev/null ; then
+		doing "No Kubernetes cluster detected. Installing kind for local Kubernetes..."
+		if [[ -n "${SUDO_USER:-}" ]]; then
+			sudo -u "${SUDO_USER}" brew install kind
+		else
+			err "Script should be run with sudo on macOS"
+			exit 1
+		fi
+		
+		# Create a kind cluster
+		doing "Creating kind cluster..."
+		kind create cluster --name local
+		kubectl cluster-info --context kind-local
+	fi
+	ok "Kubernetes tools are installed"
 else
-	KUBEADM_VER="0"
-fi
+	K8S_UPGRADE_VER=""
+	if KUBEADM_VER="$(kubeadm version -o json 2>/dev/null)" ; then
+		KUBEADM_VER="$(jq -r '.clientVersion.major + "." + .clientVersion.minor' <<< "${KUBEADM_VER}")"
 
-if [ ${KUBEADM_VER//./0} -lt ${K8S_VER//./0} ] ; then
-	[ -n "${KUBEADM_VER}" ] && say "Existing Kubernetes version ${KUBEADM_VER}"
-	doing "Installing/Upgrading Kubernetes v${K8S_VER}..."
-	rm -f "${TRUSTED_GPG_DIR}/kubernetes.gpg" &>/dev/null || true
-	curl -fsSL "https://pkgs.k8s.io/core:/stable:/v${K8S_VER}/deb/Release.key" | gpg --dearmor -o "${TRUSTED_GPG_DIR}/kubernetes.gpg"
-	echo "deb https://pkgs.k8s.io/core:/stable:/v${K8S_VER}/deb/ /" > "${APT_SOURCES_DIR}/kubernetes.list"
-	apt-get update
-	apt-get install -y kubelet kubeadm kubectl
+		# Try to see if there's an upgrade plan available
+		#
+		# Wait for this to take effect, though...
+		if kubectl --context "local" --namespace "calico-system" get pods &>/dev/null ; then
+			doing "Rebooting Calico (just in case)..."
+			kubectl --context "local" --namespace "calico-system" delete pod --selector k8s-app=calico-node &>/dev/null || true
+			kubectl --context "local" --namespace "calico-system" delete pod --selector k8s-app=calico-typha &>/dev/null || true
+			doing "Waiting for Calico to reboot..."
+			kubectl --context "local" --namespace "calico-system" wait --timeout=30s --for condition=Ready pod --selector k8s-app=calico-typha &>/dev/null || err "Calico typha reboot timed out"
+			kubectl --context "local" --namespace "calico-system" wait --timeout=30s --for condition=Ready pod --selector k8s-app=calico-node &>/dev/null || err "Calico node reboot timed out"
+		fi
+
+		if kubectl --context "local" get nodes &>/dev/null ; then
+			doing "Fetching any potential upgrade information..."
+			if K8S_UPGRADE_PLAN="$(kubeadm upgrade plan -o json 2>/dev/null)" ; then
+				K8S_UPGRADE_VER="$(jq -r '.availableUpgrades[].components[] | select(.name == "kube-apiserver") | select(.currentVersion != .newVersion) | .newVersion' <<< "${K8S_UPGRADE_PLAN}")"
+			else
+				err "Could not compute an upgrade plan ... maybe it's not needed?"
+			fi
+		fi
+	else
+		KUBEADM_VER="0"
+	fi
+
+	if [[ ${KUBEADM_VER//./0} -lt ${K8S_VER//./0} ]] ; then
+		[[ -n "${KUBEADM_VER}" ]] && say "Existing Kubernetes version ${KUBEADM_VER}"
+		doing "Installing/Upgrading Kubernetes v${K8S_VER}..."
+		rm -f "${TRUSTED_GPG_DIR}/kubernetes.gpg" &>/dev/null || true
+		curl -fsSL "https://pkgs.k8s.io/core:/stable:/v${K8S_VER}/deb/Release.key" | gpg --dearmor -o "${TRUSTED_GPG_DIR}/kubernetes.gpg"
+		echo "deb https://pkgs.k8s.io/core:/stable:/v${K8S_VER}/deb/ /" > "${APT_SOURCES_DIR}/kubernetes.list"
+		apt-get update
+		apt-get install -y kubelet kubeadm kubectl
+	fi
+	ok "Kubernetes v${K8S_VER} is installed"
 fi
-ok "Kubernetes v${K8S_VER} is installed"
 
 #
 # Initialize the K8s node
 #
-if ! kubectl --context "local" get pods -A &>/dev/null ; then
-	(
-		doing "Initializing the Kubernetes cluster node..."
-		set -euo pipefail
-		cd "${BASE_DIR}"
-		( cd tools && tar -czf - . ) | tar -C /usr/local/bin -xzvf -
-		[ -v CLUSTER_CIDR ] && echo "	👉 CLUSTER_CIDR=[${CLUSTER_CIDR}]"
-		[ -v SERVICE_CIDR ] && echo "	👉 SERVICE_CIDR=[${SERVICE_CIDR}]"
-		"${SCRIPT_DIR}/init-cluster"
-	)
-	ok "The Kubernetes node is initialized"
-elif [ -n "${K8S_UPGRADE_VER}" ] ; then
-	doing "Uprading the Kubernetes cluster node to ${K8S_UPGRADE_VER}..."
-	kubeadm upgrade apply --yes "${K8S_UPGRADE_VER}"
-	doing "Restarting the kubelet..."
-	systemctl restart kubelet
-	ok "The Kubernetes node is upgraded to ${K8S_UPGRADE_VER}"
+if [[ "$OSTYPE" == "darwin"* ]]; then
+	# For macOS with kind, the cluster is already initialized
+	if kubectl get pods -A &>/dev/null ; then
+		ok "Kubernetes cluster is running"
+	else
+		err "Kubernetes cluster is not running. Please check Docker Desktop or kind setup."
+	fi
+else
+	if ! kubectl --context "local" get pods -A &>/dev/null ; then
+		(
+			doing "Initializing the Kubernetes cluster node..."
+			set -euo pipefail
+			cd "${BASE_DIR}"
+			( cd tools && tar -czf - . ) | tar -C /usr/local/bin -xzvf -
+			[[ -n "${CLUSTER_CIDR:-}" ]] && echo "	👉 CLUSTER_CIDR=[${CLUSTER_CIDR}]"
+			[[ -n "${SERVICE_CIDR:-}" ]] && echo "	👉 SERVICE_CIDR=[${SERVICE_CIDR}]"
+			"${SCRIPT_DIR}/init-cluster"
+		)
+		ok "The Kubernetes node is initialized"
+	elif [[ -n "${K8S_UPGRADE_VER}" ]] ; then
+		doing "Uprading the Kubernetes cluster node to ${K8S_UPGRADE_VER}..."
+		kubeadm upgrade apply --yes "${K8S_UPGRADE_VER}"
+		doing "Restarting the kubelet..."
+		systemctl restart kubelet
+		ok "The Kubernetes node is upgraded to ${K8S_UPGRADE_VER}"
+	fi
 fi
 
 #
@@ -345,11 +505,21 @@ if ! aws --version &>/dev/null ; then
 	(
 		doing "Installing AWS CLI..."
 		set -euo pipefail
-		cd
-		curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-		unzip awscliv2.zip
-		./aws/install "${UPGRADE_FLAGS[@]}"
-		rm -rf aws awscliv2.zip
+		if [[ "$OSTYPE" == "darwin"* ]]; then
+			if [[ -n "${SUDO_USER:-}" ]]; then
+				sudo -u "${SUDO_USER}" brew install awscli
+			else
+				err "Script should be run with sudo on macOS"
+				exit 1
+			fi
+		else
+			cd
+			curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+			unzip awscliv2.zip
+			UPGRADE_FLAGS=()
+			./aws/install "${UPGRADE_FLAGS[@]}"
+			rm -rf aws awscliv2.zip
+		fi
 		aws --version
 	)
 fi

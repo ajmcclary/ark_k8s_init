@@ -1,5 +1,10 @@
 #!/bin/bash
-SCRIPT="$(readlink -f "${0}")"
+# macOS compatible readlink
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    SCRIPT="$(python3 -c "import os; print(os.path.realpath('${0}'))")"
+else
+    SCRIPT="$(readlink -f "${0}")"
+fi
 BASEDIR="$(dirname "${SCRIPT}")"
 SOURCE="${BASH_SOURCE:-${0}}"
 
@@ -7,7 +12,11 @@ set -euo pipefail
 
 timestamp()
 {
-	/usr/bin/date -Ins -u
+	if [[ "$OSTYPE" == "darwin"* ]]; then
+		/bin/date -u "+%Y-%m-%dT%H:%M:%S.000000000Z"
+	else
+		/usr/bin/date -Ins -u
+	fi
 }
 
 say()

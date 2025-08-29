@@ -1,5 +1,10 @@
 #!/bin/bash
-SCRIPT="$(readlink -f "${0}")"
+# macOS compatible readlink
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    SCRIPT="$(python3 -c "import os; print(os.path.realpath('${0}'))")"
+else
+    SCRIPT="$(readlink -f "${0}")"
+fi
 BASEDIR="$(dirname "${SCRIPT}")"
 SCRIPT="$(basename "${SCRIPT}")"
 

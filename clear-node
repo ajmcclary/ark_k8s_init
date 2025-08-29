@@ -1,11 +1,16 @@
 #!/bin/bash
-SCRIPT="$(readlink -f "${0}")"
+# macOS compatible readlink
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    SCRIPT="$(python3 -c "import os; print(os.path.realpath('${0}'))")"
+else
+    SCRIPT="$(readlink -f "${0}")"
+fi
 BASEDIR="$(dirname "${SCRIPT}")"
 SCRIPT="$(basename "${SCRIPT}")"
 
 set -euo pipefail
 
-[ "$(/usr/bin/id -u)" == "0" ] || exec sudo -EH "${0}" "${@}"
+[ "$(id -u)" == "0" ] || exec sudo -EH "${0}" "${@}"
 
 CRI_SOCKETS=(/var/run/cri-dockerd.sock /var/run/crio/crio.sock /var/run/containerd/containerd.sock)
 for SOCKET in "${CRI_SOCKETS[@]}" ; do
@@ -23,8 +28,15 @@ echo_run()
 }
 
 # Clean house
-echo_run kubeadm reset -f "${CRI[@]}"
-[ -d /etc/cni/net.d ] && rm -rf /etc/cni/net.d
+if [[ "$OSTYPE" == "darwin"* ]]; then
+	# For macOS with kind
+	if command -v kind &>/dev/null; then
+		echo_run kind delete cluster --name local
+	fi
+else
+	echo_run kubeadm reset -f "${CRI[@]}"
+	[ -d /etc/cni/net.d ] && rm -rf /etc/cni/net.d
+fi
 if [ -f "${HOME}/.kube/config" ] ; then
 	for n in context cluster user ; do
 		kubectl config delete-$n local || true
@@ -32,19 +44,29 @@ if [ -f "${HOME}/.kube/config" ] ; then
 fi
 rm -f /usr/local/share/ca-certificates/k8s-ca.crt
 
-CA_UPDATER=(update-ca-trust update-ca-certificates)
-for ca in "${CA_UPDATER[@]}" ; do
-	if type -P "${ca}" &>/dev/null ; then
-		RC=0
-		echo_run "${ca}" || RC=${?}
-		[ ${RC} -eq 0 ] || echo "WARNING: ${ca} returned ${RC} ... certificate trusts may be incomplete!"
-		break
+if [[ "$OSTYPE" == "darwin"* ]]; then
+	# macOS uses different certificate management
+	if [ -f /usr/local/share/ca-certificates/k8s-ca.crt ]; then
+		security delete-certificate -c "kubernetes" /Library/Keychains/System.keychain 2>/dev/null || true
 	fi
-done
+else
+	CA_UPDATER=(update-ca-trust update-ca-certificates)
+	for ca in "${CA_UPDATER[@]}" ; do
+		if type -P "${ca}" &>/dev/null ; then
+			RC=0
+			echo_run "${ca}" || RC=${?}
+			[ ${RC} -eq 0 ] || echo "WARNING: ${ca} returned ${RC} ... certificate trusts may be incomplete!"
+			break
+		fi
+	done
+fi
 
-CONN="K8s-Local"
-if nmcli con show "${CONN}" &>/dev/null ; then
-	echo_run nmcli con del "${CONN}"
+if [[ "$OSTYPE" != "darwin"* ]]; then
+	# NetworkManager is Linux-specific
+	CONN="K8s-Local"
+	if command -v nmcli &>/dev/null && nmcli con show "${CONN}" &>/dev/null ; then
+		echo_run nmcli con del "${CONN}"
+	fi
 fi
 
 SYSTEMD_DIR="/etc/systemd"

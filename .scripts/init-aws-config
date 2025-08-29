@@ -1,5 +1,10 @@
 #!/bin/bash
-SCRIPT="$(readlink -f "${BASH_SOURCE:-${0}}")"
+# macOS compatible readlink
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    SCRIPT="$(python3 -c "import os; print(os.path.realpath('${BASH_SOURCE:-${0}}'))")"
+else
+    SCRIPT="$(readlink -f "${BASH_SOURCE:-${0}}")"
+fi
 BASEDIR="$(dirname "${SCRIPT}")"
 SCRIPT="$(basename "${SCRIPT}")"
 
@@ -7,7 +12,11 @@ set -euo pipefail
 
 timestamp()
 {
-	date -Ins -u
+	if [[ "$OSTYPE" == "darwin"* ]]; then
+		/bin/date -u "+%Y-%m-%dT%H:%M:%S.000000000Z"
+	else
+		date -Ins -u
+	fi
 }
 
 say()
@@ -37,19 +46,27 @@ fi
 #
 # Set up the AWS configuration
 #
-[ -v AWS_CONFIG ] || AWS_CONFIG="${HOME}/.aws/config"
-[ -v AWS_CREDS ] || AWS_CREDS="${HOME}/.aws/credentials"
-[ -v AWS_PROFILE ] || AWS_PROFILE="armedia-marketplace"
+[[ -n "${AWS_CONFIG:-}" ]] || AWS_CONFIG="${HOME}/.aws/config"
+[[ -n "${AWS_CREDS:-}" ]] || AWS_CREDS="${HOME}/.aws/credentials"
+[[ -n "${AWS_PROFILE:-}" ]] || AWS_PROFILE="armedia-marketplace"
 
 if [ -f "${AWS_CONFIG}" ] ; then
 	say "✅ The AWS configuration is already created at [${AWS_CONFIG}] for user ${CURRENT_USER}..."
 
 	# Remove any existing "armedia-marketplace" profiles
 	say "👉 Removing the existing ${AWS_PROFILE} profile from the AWS configuration..."
-	sed -i \
-		-e '/^\s*\[\s*profile\s\+'"${AWS_PROFILE}"'\s*\]\s*$/,/^\s*\[/{/^\s*\[\s*profile\s\+'"${AWS_PROFILE}"'\s*\]\s*$/d;/^\s*\[/!d}' \
-		-e '/^\s*\[\s*'"${AWS_PROFILE}"'\s*\]\s*$/,/^\s*\[/{/^\s*\[\s*'"${AWS_PROFILE}"'\s*\]\s*$/d;/^\s*\[/!d}' \
-		"${AWS_CONFIG}"
+	if [[ "$OSTYPE" == "darwin"* ]]; then
+		# macOS sed requires backup extension with -i
+		sed -i '' \
+			-e '/^[[:space:]]*\[[[:space:]]*profile[[:space:]]\+'"${AWS_PROFILE}"'[[:space:]]*\][[:space:]]*$/,/^[[:space:]]*\[/{/^[[:space:]]*\[[[:space:]]*profile[[:space:]]\+'"${AWS_PROFILE}"'[[:space:]]*\][[:space:]]*$/d;/^[[:space:]]*\[/!d;}' \
+			-e '/^[[:space:]]*\[[[:space:]]*'"${AWS_PROFILE}"'[[:space:]]*\][[:space:]]*$/,/^[[:space:]]*\[/{/^[[:space:]]*\[[[:space:]]*'"${AWS_PROFILE}"'[[:space:]]*\][[:space:]]*$/d;/^[[:space:]]*\[/!d;}' \
+			"${AWS_CONFIG}"
+	else
+		sed -i \
+			-e '/^\s*\[\s*profile\s\+'"${AWS_PROFILE}"'\s*\]\s*$/,/^\s*\[/{/^\s*\[\s*profile\s\+'"${AWS_PROFILE}"'\s*\]\s*$/d;/^\s*\[/!d}' \
+			-e '/^\s*\[\s*'"${AWS_PROFILE}"'\s*\]\s*$/,/^\s*\[/{/^\s*\[\s*'"${AWS_PROFILE}"'\s*\]\s*$/d;/^\s*\[/!d}' \
+			"${AWS_CONFIG}"
+	fi
 else
 	say "👉 Creating your AWS configuration for user ${CURRENT_USER}..."
 	mkdir -p "$(dirname "${AWS_CONFIG}")"
@@ -77,9 +94,16 @@ if [ -f "${CREDS}" ] ; then
 
 			# Remove any existing "armedia-marketplace" profiles
 			say "👉 Removing the existing ${AWS_PROFILE} profile from the AWS credentials..."
-			sed -i \
-				-e '/^\s*\[\s*'"${AWS_PROFILE}"'\s*\]\s*$/,/^\s*\[/{/^\s*\[\s*'"${AWS_PROFILE}"'\s*\]\s*$/d;/^\s*\[/!d}' \
-				"${AWS_CREDS}"
+			if [[ "$OSTYPE" == "darwin"* ]]; then
+				# macOS sed requires backup extension with -i
+				sed -i '' \
+					-e '/^[[:space:]]*\[[[:space:]]*'"${AWS_PROFILE}"'[[:space:]]*\][[:space:]]*$/,/^[[:space:]]*\[/{/^[[:space:]]*\[[[:space:]]*'"${AWS_PROFILE}"'[[:space:]]*\][[:space:]]*$/d;/^[[:space:]]*\[/!d;}' \
+					"${AWS_CREDS}"
+			else
+				sed -i \
+					-e '/^\s*\[\s*'"${AWS_PROFILE}"'\s*\]\s*$/,/^\s*\[/{/^\s*\[\s*'"${AWS_PROFILE}"'\s*\]\s*$/d;/^\s*\[/!d}' \
+					"${AWS_CREDS}"
+			fi
 		fi
 		cat <<-EOF >> "${AWS_CREDS}"
 		[${AWS_PROFILE}]

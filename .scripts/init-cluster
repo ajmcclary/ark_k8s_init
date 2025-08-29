@@ -3,7 +3,11 @@ set -euo pipefail
 
 timestamp()
 {
-	/usr/bin/date -Ins -u
+	if [[ "$OSTYPE" == "darwin"* ]]; then
+		/bin/date -u "+%Y-%m-%dT%H:%M:%S.000000000Z"
+	else
+		/usr/bin/date -Ins -u
+	fi
 }
 
 say()
@@ -30,9 +34,13 @@ fail()
 #
 # Make sure this runs as root
 #
-if [ "$(/usr/bin/id -u)" != "0" ] ; then
+if [ "$(id -u)" != "0" ] ; then
 	doing "Not running as root (or under sudo), must escalate privileges!"
-	exec /usr/bin/sudo -EH "${0}" "${@}"
+	if [[ "$OSTYPE" == "darwin"* ]]; then
+		exec sudo -EH "${0}" "${@}"
+	else
+		exec /usr/bin/sudo -EH "${0}" "${@}"
+	fi
 else
 	ok "Privilege check complete!"
 fi
@@ -93,6 +101,11 @@ get_unready_pods()
 #
 # Initialize a single-node Kubernetes cluster
 #
+
+# macOS doesn't support kubeadm - need to use different approach
+if [[ "$OSTYPE" == "darwin"* ]]; then
+	fail "This script is designed for Linux systems with kubeadm. On macOS, please use Docker Desktop's Kubernetes or kind/minikube instead."
+fi
 
 # [ -v CLUSTER_CIDR ] || export CLUSTER_CIDR="192.168.0.0/16"
 

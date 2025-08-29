@@ -1,5 +1,10 @@
 #!/bin/bash
-SCRIPT="$(readlink -f "${0}")"
+# macOS compatible readlink
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    SCRIPT="$(python3 -c "import os; print(os.path.realpath('${0}'))")"
+else
+    SCRIPT="$(readlink -f "${0}")"
+fi
 BASEDIR="$(dirname "${SCRIPT}")"
 SCRIPT="$(basename "${SCRIPT}")"
 
@@ -20,6 +25,11 @@ echo_run istioctl --context "local" install --set profile=default --set meshConf
 echo_run kubectl --context "local" label namespace default istio-injection=enabled
 
 # This needs to be run on every master node to enable automatic Istio injection
-sed -i \
-	-e 's/\(--enable-admission-plugins=[^[:space:]]*\)/\1,MutatingAdmissionWebhook,ValidatingAdmissionWebhook/g' \
-	/etc/kubernetes/manifests/kube-apiserver.yaml
+if [[ "$OSTYPE" == "darwin"* ]]; then
+	# macOS with Docker Desktop/kind doesn't expose kube-apiserver.yaml
+	echo "Note: On macOS, admission plugins are configured differently. Istio injection should work with kubectl label."
+else
+	sed -i \
+		-e 's/\(--enable-admission-plugins=[^[:space:]]*\)/\1,MutatingAdmissionWebhook,ValidatingAdmissionWebhook/g' \
+		/etc/kubernetes/manifests/kube-apiserver.yaml
+fi

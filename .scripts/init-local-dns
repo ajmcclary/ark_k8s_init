@@ -3,7 +3,11 @@ set -euo pipefail
 
 timestamp()
 {
-	date -Ins -u
+	if [[ "$OSTYPE" == "darwin"* ]]; then
+		/bin/date -u "+%Y-%m-%dT%H:%M:%S.000000000Z"
+	else
+		date -Ins -u
+	fi
 }
 
 say()
@@ -17,11 +21,20 @@ fail()
 	exit ${EXIT_CODE:-1}
 }
 
+# macOS doesn't use systemd-resolved
+if [[ "$OSTYPE" == "darwin"* ]]; then
+	say "⚠️ macOS uses its own DNS resolver, not systemd-resolved"
+	say "ℹ️  To access Kubernetes services by DNS name, you may need to:"
+	say "    1. Add the cluster DNS to your network settings"
+	say "    2. Or use port-forwarding for specific services"
+	exit 0
+fi
+
 RESOLVED="systemd-resolved.service"
 
 # TODO: Should we query what systemd's state directory is?
-[ -v SYSTEMD_DIR ] || SYSTEMD_DIR="/etc/systemd"
-[ -d "${SYSTEMD_DIR}" ] || fail "No systemd status directory foudnd at [${SYSTEMD_DIR}] ... you may have to set it explicitly via the envvar SYSTEMD_DIR"
+[[ -n "${SYSTEMD_DIR:-}" ]] || SYSTEMD_DIR="/etc/systemd"
+[ -d "${SYSTEMD_DIR}" ] || fail "No systemd status directory found at [${SYSTEMD_DIR}] ... you may have to set it explicitly via the envvar SYSTEMD_DIR"
 
 # Is systemd-resolved installed?
 if ! systemctl list-unit-files "${RESOLVED}" --legend=false &>/dev/null ; then
@@ -30,7 +43,7 @@ if ! systemctl list-unit-files "${RESOLVED}" --legend=false &>/dev/null ; then
 fi
 
 # Ok ... so we're going to do this configuration ... let's escalate first!
-if [ "$(/usr/bin/id -u)" != "0" ] ; then
+if [ "$(id -u)" != "0" ] ; then
 	say "⚠️ Not running as root, must escalate privileges!"
 	exec sudo -EH "PATH=${PATH}" "${0}" "${@}"
 fi
